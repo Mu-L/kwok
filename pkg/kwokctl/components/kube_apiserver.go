@@ -24,11 +24,14 @@ import (
 	"sigs.k8s.io/kwok/pkg/consts"
 	"sigs.k8s.io/kwok/pkg/log"
 	"sigs.k8s.io/kwok/pkg/utils/format"
+	"sigs.k8s.io/kwok/pkg/utils/net"
 	"sigs.k8s.io/kwok/pkg/utils/version"
 )
 
 // BuildKubeApiserverComponentConfig is the configuration for building a kube-apiserver component.
 type BuildKubeApiserverComponentConfig struct {
+	Runtime           string
+	ProjectName       string
 	Binary            string
 	Image             string
 	Version           version.Version
@@ -50,9 +53,7 @@ type BuildKubeApiserverComponentConfig struct {
 	Verbosity         log.Level
 	DisableQPSLimits  bool
 	TracingConfigPath string
-	ExtraArgs         []internalversion.ExtraArgs
-	ExtraVolumes      []internalversion.Volume
-	ExtraEnvs         []internalversion.Env
+	EtcdPrefix        string
 }
 
 // BuildKubeApiserverComponent builds a kube-apiserver component.
@@ -62,7 +63,7 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 	}
 
 	kubeApiserverArgs := []string{
-		"--etcd-prefix=/registry",
+		"--etcd-prefix=" + conf.EtcdPrefix,
 		"--allow-privileged=true",
 	}
 
@@ -77,7 +78,6 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 		)
 	}
 
-	kubeApiserverArgs = append(kubeApiserverArgs, extraArgsToStrings(conf.ExtraArgs)...)
 	if conf.KubeRuntimeConfig != "" {
 		kubeApiserverArgs = append(kubeApiserverArgs,
 			"--runtime-config="+conf.KubeRuntimeConfig,
@@ -119,10 +119,9 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 
 	var ports []internalversion.Port
 	var volumes []internalversion.Volume
-	volumes = append(volumes, conf.ExtraVolumes...)
+	var metric *internalversion.ComponentMetric
 
-	inContainer := conf.Image != ""
-	if inContainer {
+	if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
 		kubeApiserverArgs = append(kubeApiserverArgs,
 			"--etcd-servers=http://"+conf.EtcdAddress+":2379",
 		)
@@ -139,13 +138,16 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 			)
 		}
 
-		if inContainer {
-			ports = []internalversion.Port{
-				{
+		if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
+			ports = append(
+				ports,
+				internalversion.Port{
+					Name:     "https",
 					HostPort: conf.Port,
 					Port:     6443,
+					Protocol: internalversion.ProtocolTCP,
 				},
-			}
+			)
 			volumes = append(volumes,
 				internalversion.Volume{
 					HostPath:  conf.CaCertPath,
@@ -172,8 +174,27 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 				"--service-account-key-file=/etc/kubernetes/pki/admin.key",
 				"--service-account-signing-key-file=/etc/kubernetes/pki/admin.key",
 				"--service-account-issuer=https://kubernetes.default.svc.cluster.local",
+				"--proxy-client-key-file=/etc/kubernetes/pki/admin.key",
+				"--proxy-client-cert-file=/etc/kubernetes/pki/admin.crt",
 			)
+			metric = &internalversion.ComponentMetric{
+				Scheme:             "https",
+				Host:               conf.ProjectName + "-" + consts.ComponentKubeApiserver + ":6443",
+				Path:               "/metrics",
+				CertPath:           "/etc/kubernetes/pki/admin.crt",
+				KeyPath:            "/etc/kubernetes/pki/admin.key",
+				InsecureSkipVerify: true,
+			}
 		} else {
+			ports = append(
+				ports,
+				internalversion.Port{
+					Name:     "https",
+					HostPort: 0,
+					Port:     conf.Port,
+					Protocol: internalversion.ProtocolTCP,
+				},
+			)
 			kubeApiserverArgs = append(kubeApiserverArgs,
 				"--bind-address="+conf.BindAddress,
 				"--secure-port="+format.String(conf.Port),
@@ -183,31 +204,63 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 				"--service-account-key-file="+conf.AdminKeyPath,
 				"--service-account-signing-key-file="+conf.AdminKeyPath,
 				"--service-account-issuer=https://kubernetes.default.svc.cluster.local",
+				"--proxy-client-key-file="+conf.AdminKeyPath,
+				"--proxy-client-cert-file="+conf.AdminCertPath,
 			)
+			metric = &internalversion.ComponentMetric{
+				Scheme:             "https",
+				Host:               net.LocalAddress + ":" + format.String(conf.Port),
+				Path:               "/metrics",
+				CertPath:           conf.AdminCertPath,
+				KeyPath:            conf.AdminKeyPath,
+				InsecureSkipVerify: true,
+			}
 		}
 	} else {
-		if inContainer {
-			ports = []internalversion.Port{
-				{
+		if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
+			ports = append(
+				ports,
+				internalversion.Port{
+					Name:     "http",
 					HostPort: conf.Port,
 					Port:     8080,
+					Protocol: internalversion.ProtocolTCP,
 				},
-			}
+			)
 
 			kubeApiserverArgs = append(kubeApiserverArgs,
 				"--insecure-bind-address="+conf.BindAddress,
 				"--insecure-port=8080",
 			)
+			metric = &internalversion.ComponentMetric{
+				Scheme: "http",
+				Host:   conf.ProjectName + "-" + consts.ComponentKubeApiserver + ":8080",
+				Path:   "/metrics",
+			}
 		} else {
+			ports = append(
+				ports,
+				internalversion.Port{
+					Name:     "http",
+					HostPort: 0,
+					Port:     conf.Port,
+					Protocol: internalversion.ProtocolTCP,
+				},
+			)
 			kubeApiserverArgs = append(kubeApiserverArgs,
 				"--insecure-bind-address="+conf.BindAddress,
 				"--insecure-port="+format.String(conf.Port),
 			)
+			metric = &internalversion.ComponentMetric{
+				Scheme: "http",
+				Host:   net.LocalAddress + ":" + format.String(conf.Port),
+				Path:   "/metrics",
+			}
 		}
 	}
 
 	if conf.AuditPolicyPath != "" {
-		if inContainer {
+		if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
 			volumes = append(volumes,
 				internalversion.Volume{
 					HostPath:  conf.AuditPolicyPath,
@@ -233,7 +286,7 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 	}
 
 	if conf.TracingConfigPath != "" {
-		if inContainer {
+		if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
 			volumes = append(volumes,
 				internalversion.Volume{
 					HostPath:  conf.TracingConfigPath,
@@ -256,7 +309,6 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 	}
 
 	envs := []internalversion.Env{}
-	envs = append(envs, conf.ExtraEnvs...)
 
 	links := []string{consts.ComponentEtcd}
 	if conf.TracingConfigPath != "" {
@@ -273,6 +325,7 @@ func BuildKubeApiserverComponent(conf BuildKubeApiserverComponentConfig) (compon
 		Args:    kubeApiserverArgs,
 		Binary:  conf.Binary,
 		Image:   conf.Image,
+		Metric:  metric,
 		WorkDir: conf.Workdir,
 		Envs:    envs,
 	}, nil

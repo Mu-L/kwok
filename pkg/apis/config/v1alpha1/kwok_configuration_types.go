@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	tracingv1 "k8s.io/component-base/tracing/api/v1"
 )
 
 const (
@@ -36,6 +37,8 @@ type KwokConfiguration struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// Options holds information about the default value.
 	Options KwokConfigurationOptions `json:"options,omitempty"`
+	// Tracing holds tracing configuration.
+	Tracing TracingConfiguration `json:"tracing,omitempty"`
 }
 
 // KwokConfigurationOptions holds information about the options.
@@ -101,10 +104,12 @@ type KwokConfigurationOptions struct {
 
 	// If a Node/Pod is on a managed Node and has this annotation status will not be modified
 	// is the default value for flag --disregard-status-with-annotation-selector
+	// Deprecated: use Stage API instead
 	DisregardStatusWithAnnotationSelector string `json:"disregardStatusWithAnnotationSelector,omitempty"`
 
 	// If a Node/Pod is on a managed Node and has this label status will not be modified
 	// is the default value for flag --disregard-status-with-label-selector
+	// Deprecated: use Stage API instead
 	DisregardStatusWithLabelSelector string `json:"disregardStatusWithLabelSelector,omitempty"`
 
 	// ServerAddress is server address of the Kwok.
@@ -114,6 +119,7 @@ type KwokConfigurationOptions struct {
 	// Experimental support for getting pod ip from CNI, for CNI-related components, Only works with Linux.
 	// is the default value for flag --experimental-enable-cni
 	// +default=false
+	// Deprecated: It will be removed and will be supported in the form of plugins
 	EnableCNI *bool `json:"experimentalEnableCNI,omitempty"`
 
 	// enableDebuggingHandlers enables server endpoints for log collection
@@ -144,3 +150,6 @@ type KwokConfigurationOptions struct {
 	// +default=4
 	NodeLeaseParallelism uint `json:"nodeLeaseParallelism,omitempty"`
 }
+
+// TracingConfiguration provides versioned configuration for OpenTelemetry tracing clients.
+type TracingConfiguration tracingv1.TracingConfiguration

@@ -76,7 +76,7 @@ IMAGE_PLATFORMS ?= linux/amd64 linux/arm64
 
 BINARY_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-MANIFESTS ?= kwok kwokctl stage/fast
+MANIFESTS ?= kwok kwokctl stage/fast metrics/usage
 
 BUILDER ?= docker
 DOCKER_CLI_EXPERIMENTAL ?= enabled
@@ -214,7 +214,7 @@ cross-cluster-image:
 		--builder=${BUILDER} \
 		--push=${PUSH}
 
-## manifest: Generate manifest to deploy kwok
+## manifests: Generate manifests to deploy kwok
 .PHONY: manifests
 manifests:
 	@./hack/manifests.sh \
@@ -227,7 +227,7 @@ manifests:
 		--dry-run=${DRY_RUN} \
 		--push=${PUSH}
 
-## integration-tests: Run integration tests
+## integration-test: Run integration tests
 .PHONY: integration-test
 integration-test:
 	@echo "Not implemented yet"
@@ -245,11 +245,26 @@ e2e-test:
 ## release: Release kwok
 .PHONY: release
 release:
-	@./hack/requirements.sh gsutil buildx kustomize
+	@./hack/requirements.sh go gsutil buildx kustomize
 	@PATH=$(PWD)/bin:${PATH} make manifests cross-build cross-image cross-cluster-image
-
 
 ## help: Show this help message
 .PHONY: help
 help:
 	@cat $(MAKEFILE_LIST) | grep -e '^## ' | sed -e 's/^## //'
+
+.PRECIOUS: %.cast
+%.cast: %.demo
+	@WORK_DIR=$(shell dirname $<) \
+	ROOT_DIR=$(shell pwd) \
+	./hack/democtl.sh "$<" "$@" \
+		--ps1='\033[1;96m~/sigs.k8s.io/kwok\033[1;94m$$\033[0m '
+
+.PRECIOUS: %.svg
+%.svg: %.cast
+	@./hack/democtl.sh "$<" "$@" \
+		--term xresources \
+	  	--profile ./.xresources
+
+%.mp4: %.cast
+	@./hack/democtl.sh "$<" "$@"

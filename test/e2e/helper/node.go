@@ -33,11 +33,15 @@ func NewNodeBuilder(name string) *NodeBuilder {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: name,
 				Annotations: map[string]string{
-					"kwok.x-k8s.io/node": "fake",
+					"kwok.x-k8s.io/node":                   "fake",
+					"metrics.k8s.io/resource-metrics-path": "/metrics/nodes/" + name + "/metrics/resource",
 				},
 				Labels: map[string]string{
 					"type": "kwok",
 				},
+			},
+			Spec: corev1.NodeSpec{
+				PodCIDR: "10.10.0.1/24",
 			},
 		},
 	}
@@ -46,6 +50,15 @@ func NewNodeBuilder(name string) *NodeBuilder {
 // WithPodCIDR will set podCIDR for node.
 func (b NodeBuilder) WithPodCIDR(podCIDR string) *NodeBuilder {
 	b.node.Spec.PodCIDR = podCIDR
+	return &b
+}
+
+// WithAnnotation will set annotation for node.
+func (b NodeBuilder) WithAnnotation(key, value string) *NodeBuilder {
+	if b.node.ObjectMeta.Annotations == nil {
+		b.node.ObjectMeta.Annotations = map[string]string{}
+	}
+	b.node.ObjectMeta.Annotations[key] = value
 	return &b
 }
 

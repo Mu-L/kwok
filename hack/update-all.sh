@@ -68,9 +68,29 @@ if [[ "${UPDATE_SHELL_FORMAT:-true}" == "true" ]]; then
   "${ROOT_DIR}"/hack/update-shell-format.sh || failed+=(shell-format)
 fi
 
+if [[ "${UPDATE_YAML_FORMAT:-true}" == "true" ]]; then
+  echo "[*] Update yaml format..."
+  "${ROOT_DIR}"/hack/update-yaml-format.sh || failed+=(yaml-format)
+fi
+
 if [[ "${UPDATE_SPELLING:-true}" == "true" ]]; then
   echo "[*] Update spelling..."
   "${ROOT_DIR}"/hack/update-spelling.sh || failed+=(spelling)
+fi
+
+if [[ "${UPDATE_STAGES:-true}" == "true" ]]; then
+  echo "[*] Update stages..."
+  "${ROOT_DIR}"/hack/update-stages.sh || failed+=(stages)
+fi
+
+if [[ "${UPDATE_HELM_CHARTS:-true}" == "true" ]]; then
+  echo "[*] Update helm charts..."
+  "${ROOT_DIR}"/hack/update-helm-charts.sh || failed+=(helm-charts)
+fi
+
+if [[ "${UPDATE_DRY_RUN_TESTDATA:-true}" == "true" ]]; then
+  echo "[*] Update testdata..."
+  "${ROOT_DIR}"/hack/update-testdata.sh || failed+=(testdata)
 fi
 
 if [[ "${#failed[@]}" != 0 ]]; then

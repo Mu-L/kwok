@@ -17,6 +17,7 @@ limitations under the License.
 package binary
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/kwok/pkg/kwokctl/dryrun"
 	"sigs.k8s.io/kwok/pkg/kwokctl/k8s"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
+	"sigs.k8s.io/kwok/pkg/kwokctl/snapshot"
 	"sigs.k8s.io/kwok/pkg/log"
 	"sigs.k8s.io/kwok/pkg/utils/exec"
 	"sigs.k8s.io/kwok/pkg/utils/file"
@@ -41,8 +43,10 @@ import (
 	"sigs.k8s.io/kwok/pkg/utils/kubeconfig"
 	"sigs.k8s.io/kwok/pkg/utils/net"
 	"sigs.k8s.io/kwok/pkg/utils/path"
+	"sigs.k8s.io/kwok/pkg/utils/sets"
 	"sigs.k8s.io/kwok/pkg/utils/slices"
 	"sigs.k8s.io/kwok/pkg/utils/wait"
+	"sigs.k8s.io/kwok/pkg/utils/yaml"
 )
 
 // Cluster is an implementation of Runtime for binary
@@ -59,92 +63,6 @@ func NewCluster(name, workdir string) (runtime.Runtime, error) {
 
 // Available  checks whether the runtime is available.
 func (c *Cluster) Available(ctx context.Context) error {
-	return nil
-}
-
-func (c *Cluster) download(ctx context.Context, env *env) error {
-	conf := &env.kwokctlConfig.Options
-
-	kubeApiserverPath := c.GetBinPath(consts.ComponentKubeApiserver + conf.BinSuffix)
-	err := c.DownloadWithCache(ctx, conf.CacheDir, conf.KubeApiserverBinary, kubeApiserverPath, 0750, conf.QuietPull)
-	if err != nil {
-		return err
-	}
-
-	if !conf.DisableKubeControllerManager {
-		kubeControllerManagerPath := c.GetBinPath(consts.ComponentKubeControllerManager + conf.BinSuffix)
-		err = c.DownloadWithCache(ctx, conf.CacheDir, conf.KubeControllerManagerBinary, kubeControllerManagerPath, 0750, conf.QuietPull)
-		if err != nil {
-			return err
-		}
-	}
-
-	if !conf.DisableKubeScheduler {
-		kubeSchedulerPath := c.GetBinPath(consts.ComponentKubeScheduler + conf.BinSuffix)
-		err = c.DownloadWithCache(ctx, conf.CacheDir, conf.KubeSchedulerBinary, kubeSchedulerPath, 0750, conf.QuietPull)
-		if err != nil {
-			return err
-		}
-	}
-
-	// TODO: Add dashboard binary
-	// if conf.DashboardPort != 0 {
-	// 	kubeDashboardPath := c.GetBinPath(consts.ComponentDashboard + conf.BinSuffix)
-	// 	err = c.DownloadWithCache(ctx, conf.CacheDir, conf.DashboardBinary, kubeDashboardPath, 0750, conf.QuietPull)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	kwokControllerPath := c.GetBinPath(consts.ComponentKwokController + conf.BinSuffix)
-	err = c.DownloadWithCache(ctx, conf.CacheDir, conf.KwokControllerBinary, kwokControllerPath, 0750, conf.QuietPull)
-	if err != nil {
-		return err
-	}
-
-	etcdPath := c.GetBinPath(consts.ComponentEtcd + conf.BinSuffix)
-	if conf.EtcdBinary == "" {
-		err = c.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdPath, consts.ComponentEtcd+conf.BinSuffix, 0750, conf.QuietPull, true)
-		if err != nil {
-			return err
-		}
-	} else {
-		err = c.DownloadWithCache(ctx, conf.CacheDir, conf.EtcdBinary, etcdPath, 0750, conf.QuietPull)
-		if err != nil {
-			return err
-		}
-	}
-
-	if conf.PrometheusPort != 0 {
-		prometheusPath := c.GetBinPath(consts.ComponentPrometheus + conf.BinSuffix)
-		if conf.PrometheusBinary == "" {
-			err = c.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.PrometheusBinaryTar, prometheusPath, consts.ComponentPrometheus+conf.BinSuffix, 0750, conf.QuietPull, true)
-			if err != nil {
-				return err
-			}
-		} else {
-			err = c.DownloadWithCache(ctx, conf.CacheDir, conf.PrometheusBinary, prometheusPath, 0750, conf.QuietPull)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	if conf.JaegerPort != 0 {
-		jaegerPath := c.GetBinPath("jaeger-all-in-one" + conf.BinSuffix)
-		if conf.JaegerBinary == "" {
-			err = c.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.JaegerBinaryTar, jaegerPath, "jaeger-all-in-one"+conf.BinSuffix, 0750, conf.QuietPull, true)
-			if err != nil {
-				return err
-			}
-		} else {
-			err = c.DownloadWithCache(ctx, conf.CacheDir, conf.JaegerBinary, jaegerPath, 0750, conf.QuietPull)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -197,10 +115,10 @@ func (c *Cluster) setup(ctx context.Context, env *env) error {
 	return nil
 }
 
-func (c *Cluster) setupPorts(ctx context.Context, ports ...*uint32) error {
+func (c *Cluster) setupPorts(ctx context.Context, used sets.Sets[uint32], ports ...*uint32) error {
 	for _, port := range ports {
 		if port != nil && *port == 0 {
-			p, err := net.GetUnusedPort(ctx)
+			p, err := net.GetUnusedPort(ctx, used)
 			if err != nil {
 				return err
 			}
@@ -211,23 +129,31 @@ func (c *Cluster) setupPorts(ctx context.Context, ports ...*uint32) error {
 }
 
 type env struct {
-	kwokctlConfig   *internalversion.KwokctlConfiguration
-	verbosity       log.Level
-	kubeconfigPath  string
-	etcdDataPath    string
-	kwokConfigPath  string
-	pkiPath         string
-	auditLogPath    string
-	auditPolicyPath string
-	workdir         string
-	caCertPath      string
-	adminKeyPath    string
-	adminCertPath   string
-	scheme          string
+	kwokctlConfig           *internalversion.KwokctlConfiguration
+	components              []string
+	verbosity               log.Level
+	inClusterKubeconfigPath string
+	kubeconfigPath          string
+	etcdDataPath            string
+	kwokConfigPath          string
+	pkiPath                 string
+	auditLogPath            string
+	auditPolicyPath         string
+	workdir                 string
+	caCertPath              string
+	adminKeyPath            string
+	adminCertPath           string
+	scheme                  string
+	usedPorts               sets.Sets[uint32]
 }
 
 func (c *Cluster) env(ctx context.Context) (*env, error) {
 	config, err := c.Config(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	components, err := c.Components(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +166,11 @@ func (c *Cluster) env(ctx context.Context) (*env, error) {
 	workdir := c.Workdir()
 
 	kubeconfigPath := c.GetWorkdirPath(runtime.InHostKubeconfigName)
+	inClusterKubeconfigPath := c.GetWorkdirPath(runtime.InClusterKubeconfigName)
+	if config.Options.KubeApiserverInsecurePort == 0 {
+		inClusterKubeconfigPath = kubeconfigPath
+	}
+
 	kwokConfigPath := c.GetWorkdirPath(runtime.ConfigName)
 	etcdDataPath := c.GetWorkdirPath(runtime.EtcdDataDirName)
 	pkiPath := c.GetWorkdirPath(runtime.PkiName)
@@ -257,20 +188,25 @@ func (c *Cluster) env(ctx context.Context) (*env, error) {
 	logger := log.FromContext(ctx)
 	verbosity := logger.Level()
 
+	usedPorts := runtime.GetUsedPorts(ctx)
+
 	return &env{
-		kwokctlConfig:   config,
-		verbosity:       verbosity,
-		kubeconfigPath:  kubeconfigPath,
-		etcdDataPath:    etcdDataPath,
-		kwokConfigPath:  kwokConfigPath,
-		pkiPath:         pkiPath,
-		auditLogPath:    auditLogPath,
-		auditPolicyPath: auditPolicyPath,
-		workdir:         workdir,
-		caCertPath:      caCertPath,
-		adminKeyPath:    adminKeyPath,
-		adminCertPath:   adminCertPath,
-		scheme:          scheme,
+		kwokctlConfig:           config,
+		components:              components,
+		verbosity:               verbosity,
+		inClusterKubeconfigPath: inClusterKubeconfigPath,
+		kubeconfigPath:          kubeconfigPath,
+		etcdDataPath:            etcdDataPath,
+		kwokConfigPath:          kwokConfigPath,
+		pkiPath:                 pkiPath,
+		auditLogPath:            auditLogPath,
+		auditPolicyPath:         auditPolicyPath,
+		workdir:                 workdir,
+		caCertPath:              caCertPath,
+		adminKeyPath:            adminKeyPath,
+		adminCertPath:           adminCertPath,
+		scheme:                  scheme,
+		usedPorts:               usedPorts,
 	}, nil
 }
 
@@ -310,17 +246,13 @@ func (c *Cluster) Install(ctx context.Context) error {
 		return err
 	}
 
-	err = c.download(ctx, env)
-	if err != nil {
-		return err
-	}
-
 	err = c.setup(ctx, env)
 	if err != nil {
 		return err
 	}
 
 	err = c.setupPorts(ctx,
+		env.usedPorts,
 		&env.kwokctlConfig.Options.EtcdPeerPort,
 		&env.kwokctlConfig.Options.EtcdPort,
 		&env.kwokctlConfig.Options.KubeApiserverPort,
@@ -330,12 +262,27 @@ func (c *Cluster) Install(ctx context.Context) error {
 		return err
 	}
 
+	if env.kwokctlConfig.Options.JaegerPort != 0 {
+		err = c.setupPorts(ctx,
+			env.usedPorts,
+			&env.kwokctlConfig.Options.JaegerOtlpGrpcPort,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
 	err = c.addEtcd(ctx, env)
 	if err != nil {
 		return err
 	}
 
 	err = c.addKubeApiserver(ctx, env)
+	if err != nil {
+		return err
+	}
+
+	err = c.addKubectlProxy(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -355,12 +302,22 @@ func (c *Cluster) Install(ctx context.Context) error {
 		return err
 	}
 
+	err = c.addMetricsServer(ctx, env)
+	if err != nil {
+		return err
+	}
+
 	err = c.addPrometheus(ctx, env)
 	if err != nil {
 		return err
 	}
 
 	err = c.addJaeger(ctx, env)
+	if err != nil {
+		return err
+	}
+
+	err = c.setupPrometheusConfig(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -377,26 +334,34 @@ func (c *Cluster) addEtcd(ctx context.Context, env *env) (err error) {
 	conf := &env.kwokctlConfig.Options
 
 	// Configure the etcd
-	etcdPath := c.GetBinPath(consts.ComponentEtcd + conf.BinSuffix)
+	etcdPath, err := c.EnsureBinary(ctx, consts.ComponentEtcd, conf.EtcdBinary)
+	if err != nil {
+		return err
+	}
 
 	etcdVersion, err := c.ParseVersionFromBinary(ctx, etcdPath)
 	if err != nil {
 		return err
 	}
 
-	etcdComponentPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentEtcd)
+	otlpGrpcAddress := ""
+	if conf.JaegerOtlpGrpcPort != 0 {
+		otlpGrpcAddress = net.LocalAddress + ":" + format.String(conf.JaegerOtlpGrpcPort)
+	}
+
 	etcdComponent, err := components.BuildEtcdComponent(components.BuildEtcdComponentConfig{
-		Workdir:      env.workdir,
-		Binary:       etcdPath,
-		Version:      etcdVersion,
-		BindAddress:  conf.BindAddress,
-		DataPath:     env.etcdDataPath,
-		Port:         conf.EtcdPort,
-		PeerPort:     conf.EtcdPeerPort,
-		Verbosity:    env.verbosity,
-		ExtraArgs:    etcdComponentPatches.ExtraArgs,
-		ExtraVolumes: etcdComponentPatches.ExtraVolumes,
-		ExtraEnvs:    etcdComponentPatches.ExtraEnvs,
+		Runtime:          conf.Runtime,
+		ProjectName:      c.Name(),
+		Workdir:          env.workdir,
+		Binary:           etcdPath,
+		Version:          etcdVersion,
+		BindAddress:      conf.BindAddress,
+		DataPath:         env.etcdDataPath,
+		Port:             conf.EtcdPort,
+		PeerPort:         conf.EtcdPeerPort,
+		Verbosity:        env.verbosity,
+		QuotaBackendSize: conf.EtcdQuotaBackendSize,
+		OtlpGrpcAddress:  otlpGrpcAddress,
 	})
 	if err != nil {
 		return err
@@ -409,7 +374,10 @@ func (c *Cluster) addKubeApiserver(ctx context.Context, env *env) (err error) {
 	conf := &env.kwokctlConfig.Options
 
 	// Configure the kube-apiserver
-	kubeApiserverPath := c.GetBinPath(consts.ComponentKubeApiserver + conf.BinSuffix)
+	kubeApiserverPath, err := c.EnsureBinary(ctx, consts.ComponentKubeApiserver, conf.KubeApiserverBinary)
+	if err != nil {
+		return err
+	}
 
 	kubeApiserverVersion, err := c.ParseVersionFromBinary(ctx, kubeApiserverPath)
 	if err != nil {
@@ -417,14 +385,7 @@ func (c *Cluster) addKubeApiserver(ctx context.Context, env *env) (err error) {
 	}
 
 	kubeApiserverTracingConfigPath := ""
-	if conf.JaegerPort != 0 {
-		err = c.setupPorts(ctx,
-			&conf.JaegerOtlpGrpcPort,
-		)
-		if err != nil {
-			return err
-		}
-
+	if conf.JaegerOtlpGrpcPort != 0 {
 		kubeApiserverTracingConfigData, err := k8s.BuildKubeApiserverTracingConfig(k8s.BuildKubeApiserverTracingConfigParam{
 			Endpoint: net.LocalAddress + ":" + format.String(conf.JaegerOtlpGrpcPort),
 		})
@@ -439,8 +400,9 @@ func (c *Cluster) addKubeApiserver(ctx context.Context, env *env) (err error) {
 		}
 	}
 
-	kubeApiserverComponentPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentKubeApiserver)
 	kubeApiserverComponent, err := components.BuildKubeApiserverComponent(components.BuildKubeApiserverComponentConfig{
+		Runtime:           conf.Runtime,
+		ProjectName:       c.Name(),
 		Workdir:           env.workdir,
 		Binary:            kubeApiserverPath,
 		Version:           kubeApiserverVersion,
@@ -461,9 +423,7 @@ func (c *Cluster) addKubeApiserver(ctx context.Context, env *env) (err error) {
 		Verbosity:         env.verbosity,
 		DisableQPSLimits:  conf.DisableQPSLimits,
 		TracingConfigPath: kubeApiserverTracingConfigPath,
-		ExtraArgs:         kubeApiserverComponentPatches.ExtraArgs,
-		ExtraVolumes:      kubeApiserverComponentPatches.ExtraVolumes,
-		ExtraEnvs:         kubeApiserverComponentPatches.ExtraEnvs,
+		EtcdPrefix:        conf.EtcdPrefix,
 	})
 	if err != nil {
 		return err
@@ -472,132 +432,185 @@ func (c *Cluster) addKubeApiserver(ctx context.Context, env *env) (err error) {
 	return nil
 }
 
+func (c *Cluster) addKubectlProxy(ctx context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentKubeApiserverInsecureProxy) {
+		return nil
+	}
+
+	conf := &env.kwokctlConfig.Options
+
+	// Configure the kubectl
+	kubectlPath, err := c.KubectlPath(ctx)
+	if err != nil {
+		return err
+	}
+
+	kubectlProxyComponent, err := components.BuildKubectlProxyComponent(components.BuildKubectlProxyComponentConfig{
+		Runtime:        conf.Runtime,
+		ProjectName:    c.Name(),
+		Workdir:        env.workdir,
+		Binary:         kubectlPath,
+		BindAddress:    conf.BindAddress,
+		Port:           conf.KubeApiserverInsecurePort,
+		KubeconfigPath: env.inClusterKubeconfigPath,
+		CaCertPath:     env.caCertPath,
+		AdminCertPath:  env.adminCertPath,
+		AdminKeyPath:   env.adminKeyPath,
+		Verbosity:      env.verbosity,
+	})
+	if err != nil {
+		return err
+	}
+	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, kubectlProxyComponent)
+	return nil
+}
+
 func (c *Cluster) addKubeControllerManager(ctx context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentKubeControllerManager) {
+		return nil
+	}
+
 	conf := &env.kwokctlConfig.Options
 
 	// Configure the kube-controller-manager
-	if !conf.DisableKubeControllerManager {
-		kubeControllerManagerPath := c.GetBinPath(consts.ComponentKubeControllerManager + conf.BinSuffix)
-
-		err = c.setupPorts(ctx,
-			&conf.KubeControllerManagerPort,
-		)
-		if err != nil {
-			return err
-		}
-
-		kubeControllerManagerVersion, err := c.ParseVersionFromBinary(ctx, kubeControllerManagerPath)
-		if err != nil {
-			return err
-		}
-
-		kubeControllerManagerPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentKubeControllerManager)
-		kubeControllerManagerComponent, err := components.BuildKubeControllerManagerComponent(components.BuildKubeControllerManagerComponentConfig{
-			Workdir:                            env.workdir,
-			Binary:                             kubeControllerManagerPath,
-			Version:                            kubeControllerManagerVersion,
-			BindAddress:                        conf.BindAddress,
-			Port:                               conf.KubeControllerManagerPort,
-			SecurePort:                         conf.SecurePort,
-			CaCertPath:                         env.caCertPath,
-			AdminCertPath:                      env.adminCertPath,
-			AdminKeyPath:                       env.adminKeyPath,
-			KubeAuthorization:                  conf.KubeAuthorization,
-			KubeconfigPath:                     env.kubeconfigPath,
-			KubeFeatureGates:                   conf.KubeFeatureGates,
-			NodeMonitorPeriodMilliseconds:      conf.KubeControllerManagerNodeMonitorPeriodMilliseconds,
-			NodeMonitorGracePeriodMilliseconds: conf.KubeControllerManagerNodeMonitorGracePeriodMilliseconds,
-			Verbosity:                          env.verbosity,
-			DisableQPSLimits:                   conf.DisableQPSLimits,
-			ExtraArgs:                          kubeControllerManagerPatches.ExtraArgs,
-			ExtraVolumes:                       kubeControllerManagerPatches.ExtraVolumes,
-			ExtraEnvs:                          kubeControllerManagerPatches.ExtraEnvs,
-		})
-		if err != nil {
-			return err
-		}
-		env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, kubeControllerManagerComponent)
+	kubeControllerManagerPath, err := c.EnsureBinary(ctx, consts.ComponentKubeControllerManager, conf.KubeControllerManagerBinary)
+	if err != nil {
+		return err
 	}
+
+	err = c.setupPorts(ctx,
+		env.usedPorts,
+		&conf.KubeControllerManagerPort,
+	)
+	if err != nil {
+		return err
+	}
+
+	kubeControllerManagerVersion, err := c.ParseVersionFromBinary(ctx, kubeControllerManagerPath)
+	if err != nil {
+		return err
+	}
+
+	kubeControllerManagerComponent, err := components.BuildKubeControllerManagerComponent(components.BuildKubeControllerManagerComponentConfig{
+		Runtime:                            conf.Runtime,
+		ProjectName:                        c.Name(),
+		Workdir:                            env.workdir,
+		Binary:                             kubeControllerManagerPath,
+		Version:                            kubeControllerManagerVersion,
+		BindAddress:                        conf.BindAddress,
+		Port:                               conf.KubeControllerManagerPort,
+		SecurePort:                         conf.SecurePort,
+		CaCertPath:                         env.caCertPath,
+		AdminCertPath:                      env.adminCertPath,
+		AdminKeyPath:                       env.adminKeyPath,
+		KubeAuthorization:                  conf.KubeAuthorization,
+		KubeconfigPath:                     env.inClusterKubeconfigPath,
+		KubeFeatureGates:                   conf.KubeFeatureGates,
+		NodeMonitorPeriodMilliseconds:      conf.KubeControllerManagerNodeMonitorPeriodMilliseconds,
+		NodeMonitorGracePeriodMilliseconds: conf.KubeControllerManagerNodeMonitorGracePeriodMilliseconds,
+		Verbosity:                          env.verbosity,
+		DisableQPSLimits:                   conf.DisableQPSLimits,
+	})
+	if err != nil {
+		return err
+	}
+	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, kubeControllerManagerComponent)
 	return nil
 }
 
 func (c *Cluster) addKubeScheduler(ctx context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentKubeScheduler) {
+		return nil
+	}
+
 	conf := &env.kwokctlConfig.Options
 
 	// Configure the kube-scheduler
-	if !conf.DisableKubeScheduler {
-		kubeSchedulerPath := c.GetBinPath(consts.ComponentKubeScheduler + conf.BinSuffix)
-
-		schedulerConfigPath := ""
-		if conf.KubeSchedulerConfig != "" {
-			schedulerConfigPath = c.GetWorkdirPath(runtime.SchedulerConfigName)
-			err = c.CopySchedulerConfig(conf.KubeSchedulerConfig, schedulerConfigPath, env.kubeconfigPath)
-			if err != nil {
-				return err
-			}
-		}
-
-		err = c.setupPorts(ctx,
-			&conf.KubeSchedulerPort,
-		)
-		if err != nil {
-			return err
-		}
-
-		kubeSchedulerVersion, err := c.ParseVersionFromBinary(ctx, kubeSchedulerPath)
-		if err != nil {
-			return err
-		}
-
-		kubeSchedulerComponentPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentKubeScheduler)
-		kubeSchedulerComponent, err := components.BuildKubeSchedulerComponent(components.BuildKubeSchedulerComponentConfig{
-			Workdir:          env.workdir,
-			Binary:           kubeSchedulerPath,
-			Version:          kubeSchedulerVersion,
-			BindAddress:      conf.BindAddress,
-			Port:             conf.KubeSchedulerPort,
-			SecurePort:       conf.SecurePort,
-			CaCertPath:       env.caCertPath,
-			AdminCertPath:    env.adminCertPath,
-			AdminKeyPath:     env.adminKeyPath,
-			ConfigPath:       schedulerConfigPath,
-			KubeconfigPath:   env.kubeconfigPath,
-			KubeFeatureGates: conf.KubeFeatureGates,
-			Verbosity:        env.verbosity,
-			DisableQPSLimits: conf.DisableQPSLimits,
-			ExtraArgs:        kubeSchedulerComponentPatches.ExtraArgs,
-			ExtraVolumes:     kubeSchedulerComponentPatches.ExtraVolumes,
-			ExtraEnvs:        kubeSchedulerComponentPatches.ExtraEnvs,
-		})
-		if err != nil {
-			return err
-		}
-		env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, kubeSchedulerComponent)
+	kubeSchedulerPath, err := c.EnsureBinary(ctx, consts.ComponentKubeScheduler, conf.KubeSchedulerBinary)
+	if err != nil {
+		return err
 	}
+
+	schedulerConfigPath := ""
+	if conf.KubeSchedulerConfig != "" {
+		schedulerConfigPath = c.GetWorkdirPath(runtime.SchedulerConfigName)
+		err = c.CopySchedulerConfig(conf.KubeSchedulerConfig, schedulerConfigPath, env.inClusterKubeconfigPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = c.setupPorts(ctx,
+		env.usedPorts,
+		&conf.KubeSchedulerPort,
+	)
+	if err != nil {
+		return err
+	}
+
+	kubeSchedulerVersion, err := c.ParseVersionFromBinary(ctx, kubeSchedulerPath)
+	if err != nil {
+		return err
+	}
+
+	kubeSchedulerComponent, err := components.BuildKubeSchedulerComponent(components.BuildKubeSchedulerComponentConfig{
+		Runtime:          conf.Runtime,
+		ProjectName:      c.Name(),
+		Workdir:          env.workdir,
+		Binary:           kubeSchedulerPath,
+		Version:          kubeSchedulerVersion,
+		BindAddress:      conf.BindAddress,
+		Port:             conf.KubeSchedulerPort,
+		SecurePort:       conf.SecurePort,
+		CaCertPath:       env.caCertPath,
+		AdminCertPath:    env.adminCertPath,
+		AdminKeyPath:     env.adminKeyPath,
+		ConfigPath:       schedulerConfigPath,
+		KubeconfigPath:   env.inClusterKubeconfigPath,
+		KubeFeatureGates: conf.KubeFeatureGates,
+		Verbosity:        env.verbosity,
+		DisableQPSLimits: conf.DisableQPSLimits,
+	})
+	if err != nil {
+		return err
+	}
+	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, kubeSchedulerComponent)
 	return nil
 }
 
 func (c *Cluster) addKwokController(ctx context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentKwokController) {
+		return nil
+	}
+
 	conf := &env.kwokctlConfig.Options
 
 	// Configure the kwok-controller
-	kwokControllerPath := c.GetBinPath(consts.ComponentKwokController + conf.BinSuffix)
+	kwokControllerPath, err := c.EnsureBinary(ctx, consts.ComponentKwokController, conf.KwokControllerBinary)
+	if err != nil {
+		return err
+	}
 
 	kwokControllerVersion, err := c.ParseVersionFromBinary(ctx, kwokControllerPath)
 	if err != nil {
 		return err
 	}
 
-	kwokControllerComponentPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentKwokController)
+	otlpGrpcAddress := ""
+	if conf.JaegerOtlpGrpcPort != 0 {
+		otlpGrpcAddress = net.LocalAddress + ":" + format.String(conf.JaegerOtlpGrpcPort)
+	}
 
 	kwokControllerComponent := components.BuildKwokControllerComponent(components.BuildKwokControllerComponentConfig{
+		Runtime:                  conf.Runtime,
+		ProjectName:              c.Name(),
 		Workdir:                  env.workdir,
 		Binary:                   kwokControllerPath,
 		Version:                  kwokControllerVersion,
 		BindAddress:              conf.BindAddress,
 		Port:                     conf.KwokControllerPort,
 		ConfigPath:               env.kwokConfigPath,
-		KubeconfigPath:           env.kubeconfigPath,
+		KubeconfigPath:           env.inClusterKubeconfigPath,
 		CaCertPath:               env.caCertPath,
 		AdminCertPath:            env.adminCertPath,
 		AdminKeyPath:             env.adminKeyPath,
@@ -605,107 +618,162 @@ func (c *Cluster) addKwokController(ctx context.Context, env *env) (err error) {
 		Verbosity:                env.verbosity,
 		NodeLeaseDurationSeconds: conf.NodeLeaseDurationSeconds,
 		EnableCRDs:               conf.EnableCRDs,
-		ExtraArgs:                kwokControllerComponentPatches.ExtraArgs,
-		ExtraEnvs:                kwokControllerComponentPatches.ExtraEnvs,
+		OtlpGrpcAddress:          otlpGrpcAddress,
 	})
-	if err != nil {
-		return err
-	}
 	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, kwokControllerComponent)
 	return nil
 }
 
-func (c *Cluster) addPrometheus(ctx context.Context, env *env) (err error) {
+func (c *Cluster) addMetricsServer(ctx context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentMetricsServer) {
+		return nil
+	}
+
 	conf := &env.kwokctlConfig.Options
 
+	metricsServerPath, err := c.EnsureBinary(ctx, consts.ComponentMetricsServer, conf.MetricsServerBinary)
+	if err != nil {
+		return err
+	}
+
+	metricsServerVersion, err := c.ParseVersionFromBinary(ctx, metricsServerPath)
+	if err != nil {
+		return err
+	}
+
+	err = c.setupPorts(ctx,
+		env.usedPorts,
+		&conf.MetricsServerPort,
+	)
+	if err != nil {
+		return err
+	}
+
+	metricsServerComponent, err := components.BuildMetricsServerComponent(components.BuildMetricsServerComponentConfig{
+		Runtime:        conf.Runtime,
+		ProjectName:    c.Name(),
+		Workdir:        env.workdir,
+		Binary:         metricsServerPath,
+		Version:        metricsServerVersion,
+		BindAddress:    conf.BindAddress,
+		Port:           conf.MetricsServerPort,
+		CaCertPath:     env.caCertPath,
+		AdminCertPath:  env.adminCertPath,
+		AdminKeyPath:   env.adminKeyPath,
+		KubeconfigPath: env.inClusterKubeconfigPath,
+		Verbosity:      env.verbosity,
+	})
+	if err != nil {
+		return err
+	}
+	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, metricsServerComponent)
+
+	return nil
+}
+
+func (c *Cluster) setupPrometheusConfig(_ context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentPrometheus) {
+		return nil
+	}
+
 	// Configure the prometheus
-	if conf.PrometheusPort != 0 {
-		prometheusPath := c.GetBinPath(consts.ComponentPrometheus + conf.BinSuffix)
-
-		prometheusData, err := BuildPrometheus(BuildPrometheusConfig{
-			ProjectName:               c.Name(),
-			SecurePort:                conf.SecurePort,
-			AdminCrtPath:              env.adminCertPath,
-			AdminKeyPath:              env.adminKeyPath,
-			PrometheusPort:            conf.PrometheusPort,
-			EtcdPort:                  conf.EtcdPort,
-			KubeApiserverPort:         conf.KubeApiserverPort,
-			KubeControllerManagerPort: conf.KubeControllerManagerPort,
-			KubeSchedulerPort:         conf.KubeSchedulerPort,
-			KwokControllerPort:        conf.KwokControllerPort,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to generate prometheus yaml: %w", err)
-		}
-		prometheusConfigPath := c.GetWorkdirPath(runtime.Prometheus)
-		err = c.WriteFile(prometheusConfigPath, []byte(prometheusData))
-		if err != nil {
-			return fmt.Errorf("failed to write prometheus yaml: %w", err)
-		}
-
-		prometheusVersion, err := c.ParseVersionFromBinary(ctx, prometheusPath)
-		if err != nil {
-			return err
-		}
-
-		prometheusComponentPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentPrometheus)
-		prometheusComponent, err := components.BuildPrometheusComponent(components.BuildPrometheusComponentConfig{
-			Workdir:      env.workdir,
-			Binary:       prometheusPath,
-			Version:      prometheusVersion,
-			BindAddress:  conf.BindAddress,
-			Port:         conf.PrometheusPort,
-			ConfigPath:   prometheusConfigPath,
-			Verbosity:    env.verbosity,
-			ExtraArgs:    prometheusComponentPatches.ExtraArgs,
-			ExtraVolumes: prometheusComponentPatches.ExtraVolumes,
-			ExtraEnvs:    prometheusComponentPatches.ExtraEnvs,
-		})
-		if err != nil {
-			return err
-		}
-		env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, prometheusComponent)
+	prometheusData, err := components.BuildPrometheus(components.BuildPrometheusConfig{
+		Components: env.kwokctlConfig.Components,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to generate prometheus yaml: %w", err)
+	}
+	prometheusConfigPath := c.GetWorkdirPath(runtime.Prometheus)
+	err = c.WriteFile(prometheusConfigPath, []byte(prometheusData))
+	if err != nil {
+		return fmt.Errorf("failed to write prometheus yaml: %w", err)
 	}
 	return nil
 }
 
+func (c *Cluster) addPrometheus(ctx context.Context, env *env) (err error) {
+	if !slices.Contains(env.components, consts.ComponentPrometheus) {
+		return nil
+	}
+
+	conf := &env.kwokctlConfig.Options
+
+	// Configure the prometheus
+	prometheusPath, err := c.EnsureBinary(ctx, consts.ComponentPrometheus, conf.PrometheusBinary)
+	if err != nil {
+		return err
+	}
+
+	prometheusConfigPath := c.GetWorkdirPath(runtime.Prometheus)
+
+	prometheusVersion, err := c.ParseVersionFromBinary(ctx, prometheusPath)
+	if err != nil {
+		return err
+	}
+
+	prometheusComponent, err := components.BuildPrometheusComponent(components.BuildPrometheusComponentConfig{
+		Runtime:                      conf.Runtime,
+		Workdir:                      env.workdir,
+		Binary:                       prometheusPath,
+		Version:                      prometheusVersion,
+		BindAddress:                  conf.BindAddress,
+		Port:                         conf.PrometheusPort,
+		ConfigPath:                   prometheusConfigPath,
+		Verbosity:                    env.verbosity,
+		DisableKubeControllerManager: !slices.Contains(env.components, consts.ComponentKubeControllerManager),
+		DisableKubeScheduler:         !slices.Contains(env.components, consts.ComponentKubeScheduler),
+	})
+	if err != nil {
+		return err
+	}
+	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, prometheusComponent)
+	return nil
+}
+
 func (c *Cluster) addJaeger(ctx context.Context, env *env) error {
+	if !slices.Contains(env.components, consts.ComponentJaeger) {
+		return nil
+	}
+
 	conf := &env.kwokctlConfig.Options
 
 	// Configure the jaeger
-	if conf.JaegerPort != 0 {
-		jaegerPath := c.GetBinPath("jaeger-all-in-one" + conf.BinSuffix)
-
-		jaegerVersion, err := c.ParseVersionFromBinary(ctx, jaegerPath)
-		if err != nil {
-			return err
-		}
-
-		jaegerComponentPatches := runtime.GetComponentPatches(env.kwokctlConfig, consts.ComponentJaeger)
-		jaegerComponent, err := components.BuildJaegerComponent(components.BuildJaegerComponentConfig{
-			Workdir:      env.workdir,
-			Binary:       jaegerPath,
-			Version:      jaegerVersion,
-			BindAddress:  conf.BindAddress,
-			Port:         conf.JaegerPort,
-			OtlpGrpcPort: conf.JaegerOtlpGrpcPort,
-			Verbosity:    env.verbosity,
-			ExtraArgs:    jaegerComponentPatches.ExtraArgs,
-			ExtraVolumes: jaegerComponentPatches.ExtraVolumes,
-		})
-		if err != nil {
-			return err
-		}
-		env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, jaegerComponent)
+	jaegerPath, err := c.EnsureBinary(ctx, consts.ComponentJaeger, conf.JaegerBinary)
+	if err != nil {
+		return err
 	}
+
+	jaegerVersion, err := c.ParseVersionFromBinary(ctx, jaegerPath)
+	if err != nil {
+		return err
+	}
+
+	jaegerComponent, err := components.BuildJaegerComponent(components.BuildJaegerComponentConfig{
+		Runtime:      conf.Runtime,
+		Workdir:      env.workdir,
+		Binary:       jaegerPath,
+		Version:      jaegerVersion,
+		BindAddress:  conf.BindAddress,
+		Port:         conf.JaegerPort,
+		OtlpGrpcPort: conf.JaegerOtlpGrpcPort,
+		Verbosity:    env.verbosity,
+	})
+	if err != nil {
+		return err
+	}
+	env.kwokctlConfig.Components = append(env.kwokctlConfig.Components, jaegerComponent)
 	return nil
 }
 
 func (c *Cluster) finishInstall(ctx context.Context, env *env) error {
 	conf := &env.kwokctlConfig.Options
 
+	for i := range env.kwokctlConfig.Components {
+		runtime.ApplyComponentPatches(ctx, &env.kwokctlConfig.Components[i], env.kwokctlConfig.ComponentsPatches)
+	}
+
 	// Setup kubeconfig
-	kubeconfigData, err := kubeconfig.EncodeKubeconfig(kubeconfig.BuildKubeconfig(kubeconfig.BuildKubeconfigConfig{
+	inClusterKubeconfigData, err := kubeconfig.EncodeKubeconfig(kubeconfig.BuildKubeconfig(kubeconfig.BuildKubeconfigConfig{
 		ProjectName:  c.Name(),
 		SecurePort:   conf.SecurePort,
 		Address:      env.scheme + "://" + net.LocalAddress + ":" + format.String(conf.KubeApiserverPort),
@@ -716,9 +784,24 @@ func (c *Cluster) finishInstall(ctx context.Context, env *env) error {
 	if err != nil {
 		return err
 	}
-	err = c.WriteFile(env.kubeconfigPath, kubeconfigData)
+	err = c.WriteFile(env.inClusterKubeconfigPath, inClusterKubeconfigData)
 	if err != nil {
 		return err
+	}
+
+	if conf.KubeApiserverInsecurePort != 0 {
+		kubeconfigData, err := kubeconfig.EncodeKubeconfig(kubeconfig.BuildKubeconfig(kubeconfig.BuildKubeconfigConfig{
+			ProjectName: c.Name(),
+			SecurePort:  false,
+			Address:     "http://" + net.LocalAddress + ":" + format.String(conf.KubeApiserverInsecurePort),
+		}))
+		if err != nil {
+			return err
+		}
+		err = c.WriteFile(env.kubeconfigPath, kubeconfigData)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Save config
@@ -1079,12 +1162,13 @@ func (c *Cluster) ListBinaries(ctx context.Context) ([]string, error) {
 	conf := &config.Options
 
 	return []string{
-		conf.EtcdBinaryTar,
+		conf.EtcdBinary,
 		conf.KubeApiserverBinary,
 		conf.KubeControllerManagerBinary,
 		conf.KubeSchedulerBinary,
 		conf.KwokControllerBinary,
-		conf.PrometheusBinaryTar,
+		conf.PrometheusBinary,
+		conf.MetricsServerBinary,
 		conf.KubectlBinary,
 	}, nil
 }
@@ -1104,6 +1188,23 @@ func (c *Cluster) EtcdctlInCluster(ctx context.Context, args ...string) error {
 	return c.Etcdctl(ctx, append([]string{"--endpoints", net.LocalAddress + ":" + format.String(conf.EtcdPort)}, args...)...)
 }
 
+// InspectComponent returns the status of the component
+func (c *Cluster) InspectComponent(ctx context.Context, name string) (runtime.ComponentStatus, error) {
+	component, err := c.GetComponent(ctx, name)
+	if err != nil {
+		return runtime.ComponentStatusUnknown, err
+	}
+
+	running := c.isRunning(ctx, component)
+	if !running {
+		return runtime.ComponentStatusStopped, nil
+	}
+
+	// TODO: check if the component is ready
+
+	return runtime.ComponentStatusReady, nil
+}
+
 // Ready returns true if the cluster is ready
 func (c *Cluster) Ready(ctx context.Context) (bool, error) {
 	config, err := c.Config(ctx)
@@ -1111,8 +1212,10 @@ func (c *Cluster) Ready(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
+	// TODO: Only the necessary components are checked for readiness.
 	for _, component := range config.Components {
-		if !c.isRunning(ctx, component) {
+		s, _ := c.InspectComponent(ctx, component.Name)
+		if s != runtime.ComponentStatusReady {
 			return false, nil
 		}
 	}
@@ -1152,4 +1255,58 @@ func (c *Cluster) WaitReady(ctx context.Context, timeout time.Duration) error {
 		return waitErr
 	}
 	return nil
+}
+
+// InitCRs initializes the CRs.
+func (c *Cluster) InitCRs(ctx context.Context) error {
+	config, err := c.Config(ctx)
+	if err != nil {
+		return err
+	}
+	conf := config.Options
+
+	_, enableMetricsServer := slices.Find(config.Components, func(c internalversion.Component) bool {
+		return c.Name == consts.ComponentMetricsServer
+	})
+	if c.IsDryRun() {
+		if enableMetricsServer {
+			dryrun.PrintMessage("# Set up apiservice for metrics server")
+		}
+
+		return nil
+	}
+
+	buf := bytes.NewBuffer(nil)
+	if enableMetricsServer {
+		apiservice, err := components.BuildMetricsServerAPIService(components.BuildMetricsServerAPIServiceConfig{
+			Port:         conf.MetricsServerPort,
+			ExternalName: "localhost",
+		})
+		if err != nil {
+			return err
+		}
+		_, _ = buf.WriteString(apiservice)
+		_, _ = buf.WriteString("---\n")
+	}
+
+	if buf.Len() == 0 {
+		return nil
+	}
+
+	clientset, err := c.GetClientset(ctx)
+	if err != nil {
+		return err
+	}
+
+	loader, err := snapshot.NewLoader(snapshot.LoadConfig{
+		Clientset: clientset,
+		NoFilers:  true,
+	})
+	if err != nil {
+		return err
+	}
+
+	decoder := yaml.NewDecoder(buf)
+
+	return loader.Load(ctx, decoder)
 }

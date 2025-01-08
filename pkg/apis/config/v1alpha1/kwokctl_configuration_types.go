@@ -26,6 +26,7 @@ const (
 
 	// ModeStableFeatureGateAndAPI is intended to reduce cluster configuration requirements
 	// Disables all Alpha feature by default, as well as Beta feature that are not eventually GA
+	// Deprecated: This mode will be removed in a future release
 	ModeStableFeatureGateAndAPI = "StableFeatureGateAndAPI"
 )
 
@@ -60,6 +61,8 @@ type ExtraArgs struct {
 	Key string `json:"key"`
 	// Value is the value of the extra args.
 	Value string `json:"value"`
+	// Override is the value of is it override the arg
+	Override bool `json:"override"`
 }
 
 // ComponentPatches holds information about the component patches.
@@ -83,6 +86,14 @@ type KwokctlConfigurationOptions struct {
 	// KubeApiserverPort is the port to expose apiserver.
 	// is the default value for flag --kube-apiserver-port and env KWOK_KUBE_APISERVER_PORT
 	KubeApiserverPort uint32 `json:"kubeApiserverPort,omitempty"`
+
+	// KubeApiserverInsecurePort is the port to expose insecure apiserver.
+	// is the default value for flag --kube-apiserver-insecure-port and env KWOK_KUBE_APISERVER_INSECURE_PORT
+	KubeApiserverInsecurePort uint32 `json:"kubeApiserverInsecurePort,omitempty"`
+
+	// InsecureKubeconfig is the flag to use insecure kubeconfig.
+	// only available when KubeApiserverInsecurePort is set.
+	InsecureKubeconfig bool `json:"insecureKubeconfig,omitempty"`
 
 	// Runtime is the runtime to use.
 	// is the default value for flag --runtime and env KWOK_RUNTIME
@@ -119,6 +130,9 @@ type KwokctlConfigurationOptions struct {
 	// DashboardVersion is the version of Kubernetes dashboard to use.
 	DashboardVersion string `json:"dashboardVersion,omitempty"`
 
+	// DashboardMetricsScraperVersion is the version of Kubernetes dashboard metrics scraper to use.
+	DashboardMetricsScraperVersion string `json:"dashboardMetricsScraperVersion,omitempty"`
+
 	// PrometheusVersion is the version of Prometheus to use.
 	// is the default value for env KWOK_PROMETHEUS_VERSION
 	PrometheusVersion string `json:"prometheusVersion,omitempty"`
@@ -127,10 +141,8 @@ type KwokctlConfigurationOptions struct {
 	// is the default value for env KWOK_JAEGER_VERSION
 	JaegerVersion string `json:"jaegerVersion,omitempty"`
 
-	// DockerComposeVersion is the version of docker-compose to use.
-	// is the default value for env KWOK_DOCKER_COMPOSE_VERSION
-	// Deprecated: docker compose will be removed in a future release
-	DockerComposeVersion string `json:"dockerComposeVersion,omitempty"`
+	// MetricsServerVersion is the version of metrics-server to use.
+	MetricsServerVersion string `json:"metricsServerVersion,omitempty"`
 
 	// KindVersion is the version of kind to use.
 	// is the default value for env KWOK_KIND_VERSION
@@ -150,15 +162,31 @@ type KwokctlConfigurationOptions struct {
 	// is the default value for flag --kube-scheduler-config and env KWOK_KUBE_SCHEDULER_CONFIG
 	KubeSchedulerConfig string `json:"kubeSchedulerConfig,omitempty"`
 
+	// Components is the configuration for components.
+	Components []string `json:"components,omitempty"`
+
+	// Disable is the configuration for disables components.
+	Disable []string `json:"disable,omitempty"`
+
+	// Enable is the configuration for enables components.
+	Enable []string `json:"enable,omitempty"`
+
 	// DisableKubeScheduler is the flag to disable kube-scheduler.
 	// is the default value for flag --disable-kube-scheduler and env KWOK_DISABLE_KUBE_SCHEDULER
 	// +default=false
+	// Deprecated: Use Disable instead
 	DisableKubeScheduler *bool `json:"disableKubeScheduler,omitempty"`
 
 	// DisableKubeControllerManager is the flag to disable kube-controller-manager.
 	// is the default value for flag --disable-kube-controller-manager and env KWOK_DISABLE_KUBE_CONTROLLER_MANAGER
 	// +default=false
+	// Deprecated: Use Disable instead
 	DisableKubeControllerManager *bool `json:"disableKubeControllerManager,omitempty"`
+
+	// EnableMetricsServer is the flag to enable metrics-server.
+	// +default=false
+	// Deprecated: Use Enable instead
+	EnableMetricsServer *bool `json:"enableMetricsServer,omitempty"`
 
 	// KubeImagePrefix is the prefix of the kubernetes image.
 	// is the default value for env KWOK_KUBE_IMAGE_PREFIX
@@ -189,6 +217,10 @@ type KwokctlConfigurationOptions struct {
 	//+k8s:conversion-gen=false
 	JaegerImagePrefix string `json:"jaegerImagePrefix,omitempty"`
 
+	// MetricsServerImagePrefix is the prefix of the metrics-server image.
+	//+k8s:conversion-gen=false
+	MetricsServerImagePrefix string `json:"metricsServerImagePrefix,omitempty"`
+
 	// EtcdImage is the image of etcd.
 	// is the default value for flag --etcd-image and env KWOK_ETCD_IMAGE
 	EtcdImage string `json:"etcdImage,omitempty"`
@@ -205,12 +237,19 @@ type KwokctlConfigurationOptions struct {
 	// is the default value for flag --kube-scheduler-image and env KWOK_KUBE_SCHEDULER_IMAGE
 	KubeSchedulerImage string `json:"kubeSchedulerImage,omitempty"`
 
+	// KubectlImage is the image of kubectl.
+	// is the default value for flag --kubectl-image and env KWOK_KUBECTL_IMAGE
+	KubectlImage string `json:"kubectlImage,omitempty"`
+
 	// KwokControllerImage is the image of Kwok.
 	// is the default value for flag --controller-image and env KWOK_CONTROLLER_IMAGE
 	KwokControllerImage string `json:"kwokControllerImage,omitempty"`
 
 	// DashboardImage is the image of dashboard.
 	DashboardImage string `json:"dashboardImage,omitempty"`
+
+	// DashboardMetricsScraperImage is the image of dashboard metrics scraper.
+	DashboardMetricsScraperImage string `json:"dashboardMetricsScraperImage,omitempty"`
 
 	// PrometheusImage is the image of Prometheus.
 	// is the default value for flag --prometheus-image and env KWOK_PROMETHEUS_IMAGE
@@ -219,6 +258,9 @@ type KwokctlConfigurationOptions struct {
 	// JaegerImage is the image of Jaeger.
 	// is the default value for flag --jaeger-image and env KWOK_JAEGER_IMAGE
 	JaegerImage string `json:"jaegerImage,omitempty"`
+
+	// MetricsServerImage is the image of metrics-server.
+	MetricsServerImage string `json:"metricsServerImage,omitempty"`
 
 	// KindNodeImagePrefix is the prefix of the kind node image.
 	// is the default value for env KWOK_KIND_NODE_IMAGE_PREFIX
@@ -259,13 +301,22 @@ type KwokctlConfigurationOptions struct {
 	//+k8s:conversion-gen=false
 	EtcdBinaryPrefix string `json:"etcdBinaryPrefix,omitempty"`
 
+	// EtcdctlBinary is the binary of etcdctl.
+	EtcdctlBinary string `json:"etcdctlBinary,omitempty"`
+
 	// EtcdBinary is the binary of etcd.
 	// is the default value for flag --etcd-binary and env KWOK_ETCD_BINARY
 	EtcdBinary string `json:"etcdBinary,omitempty"`
 
 	// EtcdBinaryTar is the tar of the binary of etcd.
 	// is the default value for env KWOK_ETCD_BINARY_TAR
+	// Deprecated: Use EtcdBinary or EtcdctlBinary instead
+	//+k8s:conversion-gen=false
 	EtcdBinaryTar string `json:"etcdBinaryTar,omitempty"`
+
+	// EtcdPrefix is the prefix of etcd.
+	// +default="/registry"
+	EtcdPrefix string `json:"etcdPrefix,omitempty"`
 
 	// KwokBinaryPrefix is the prefix of the kwok binary.
 	// is the default value for env KWOK_BINARY_PREFIX
@@ -295,6 +346,8 @@ type KwokctlConfigurationOptions struct {
 
 	// PrometheusBinaryTar is the tar of binary of Prometheus.
 	// is the default value for env KWOK_PROMETHEUS_BINARY_TAR
+	// Deprecated: Use PrometheusBinary instead
+	//+k8s:conversion-gen=false
 	PrometheusBinaryTar string `json:"prometheusBinaryTar,omitempty"`
 
 	// JaegerBinaryPrefix is the prefix of the Jaeger binary.
@@ -308,18 +361,16 @@ type KwokctlConfigurationOptions struct {
 
 	// JaegerBinaryTar is the tar of binary of Jaeger.
 	// is the default value for env KWOK_JAEGER_TAR
+	// Deprecated: Use JaegerBinary instead
+	//+k8s:conversion-gen=false
 	JaegerBinaryTar string `json:"jaegerBinaryTar,omitempty"`
 
-	// DockerComposeBinaryPrefix is the binary of docker-compose.
-	// is the default value for env KWOK_DOCKER_COMPOSE_BINARY_PREFIX
-	// Deprecated: docker compose will be removed in a future release
+	// MetricsServerBinaryPrefix is the prefix of the metrics-server binary.
 	//+k8s:conversion-gen=false
-	DockerComposeBinaryPrefix string `json:"dockerComposeBinaryPrefix,omitempty"`
+	MetricsServerBinaryPrefix string `json:"metricsServerBinaryPrefix,omitempty"`
 
-	// DockerComposeBinary is the binary of Docker compose.
-	// is the default value for flag --docker-compose-binary and env KWOK_DOCKER_COMPOSE_BINARY
-	// Deprecated: docker compose will be removed in a future release
-	DockerComposeBinary string `json:"dockerComposeBinary,omitempty"`
+	// MetricsServerBinary is the binary of metrics-server.
+	MetricsServerBinary string `json:"metricsServerBinary,omitempty"`
 
 	// KindBinaryPrefix is the binary prefix of kind.
 	// is the default value for env KWOK_KIND_BINARY_PREFIX
@@ -332,6 +383,10 @@ type KwokctlConfigurationOptions struct {
 
 	// Mode is several default parameter templates for clusters
 	// is the default value for env KWOK_MODE
+	// k8s 1.29, different components use different FeatureGate,
+	// which makes it impossible to create clusters properly using this feature.
+	// Deprecated: This mode will be removed in a future release
+	//+k8s:conversion-gen=false
 	Mode string `json:"mode,omitempty"`
 
 	// KubeFeatureGates is a set of key=value pairs that describe feature gates for alpha/experimental features of Kubernetes.
@@ -373,24 +428,31 @@ type KwokctlConfigurationOptions struct {
 	// is the default value for flag --controller-port and env KWOK_CONTROLLER_PORT
 	KwokControllerPort uint32 `json:"kwokControllerPort,omitempty"`
 
+	// MetricsServerPort is metrics-server port that is exposed to the host.
+	MetricsServerPort uint32 `json:"metricsServerPort,omitempty"`
+
 	// CacheDir is the directory of the cache.
 	CacheDir string `json:"cacheDir,omitempty"`
 
 	// KubeControllerManagerNodeMonitorPeriodMilliseconds is --node-monitor-period for kube-controller-manager.
-	// +default=600000
+	// +default=5000
 	KubeControllerManagerNodeMonitorPeriodMilliseconds int64 `json:"kubeControllerManagerNodeMonitorPeriodMilliseconds,omitempty"`
 
 	// KubeControllerManagerNodeMonitorGracePeriodMilliseconds is --node-monitor-grace-period for kube-controller-manager.
-	// +default=3600000
+	// +default=40000
 	KubeControllerManagerNodeMonitorGracePeriodMilliseconds int64 `json:"kubeControllerManagerNodeMonitorGracePeriodMilliseconds,omitempty"`
 
 	// NodeStatusUpdateFrequencyMilliseconds is --node-status-update-frequency for kwok like kubelet.
-	// +default=1200000
+	// +default=10000
 	NodeStatusUpdateFrequencyMilliseconds int64 `json:"nodeStatusUpdateFrequencyMilliseconds,omitempty"`
 
 	// NodeLeaseDurationSeconds is the duration the Kubelet will set on its corresponding Lease.
-	// +default=1200
+	// +default=40
 	NodeLeaseDurationSeconds uint `json:"nodeLeaseDurationSeconds,omitempty"`
+
+	// HeartbeatFactor is the scale factor for all about heartbeat.
+	// +default=5
+	HeartbeatFactor *float64 `json:"heartbeatFactor,omitempty"`
 
 	// BindAddress is the address to bind to.
 	// +default="0.0.0.0"
@@ -402,6 +464,10 @@ type KwokctlConfigurationOptions struct {
 	// DisableQPSLimits specifies whether to disable QPS limits for components.
 	// +default=false
 	DisableQPSLimits *bool `json:"disableQPSLimits,omitempty"`
+
+	// EtcdQuotaBackendSize is the backend quota for etcd.
+	// +default="8Gi"
+	EtcdQuotaBackendSize string `json:"etcdQuotaBackendSize,omitempty"`
 }
 
 // Component is a component of the cluster.
@@ -451,6 +517,12 @@ type Component struct {
 	// +optional
 	Volumes []Volume `json:"volumes,omitempty"`
 
+	// Metric is the metric of the component.
+	Metric *ComponentMetric `json:"metric,omitempty"`
+
+	// MetricsDiscovery is the metrics discovery of the component.
+	MetricsDiscovery *ComponentMetric `json:"metricsDiscovery,omitempty"`
+
 	// Version is the version of the component.
 	// +optional
 	Version string `json:"version,omitempty"`
@@ -483,6 +555,23 @@ type Port struct {
 	// +optional
 	// +default="TCP"
 	Protocol Protocol `json:"protocol,omitempty"`
+}
+
+// ComponentMetric represents a metric of a component.
+type ComponentMetric struct {
+	// Scheme is the scheme of the metric.
+	Scheme string `json:"scheme"`
+	// Host is the host of the metric.
+	Host string `json:"host"`
+	// Path is the path of the metric.
+	Path string `json:"path"`
+
+	// CertPath is the cert path of the metric.
+	CertPath string `json:"certPath,omitempty"`
+	// KeyPath is the key path of the metric.
+	KeyPath string `json:"keyPath,omitempty"`
+	// InsecureSkipVerify is the flag to skip verify the metric.
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
 }
 
 // Protocol defines network protocols supported for things like component ports.

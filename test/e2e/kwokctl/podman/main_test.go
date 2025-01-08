@@ -18,14 +18,13 @@ limitations under the License.
 package podman_test
 
 import (
-	"context"
+	"flag"
 	"os"
 	"runtime"
 	"testing"
 
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
-	"sigs.k8s.io/e2e-framework/pkg/envfuncs"
 	"sigs.k8s.io/e2e-framework/support/kwok"
 
 	"sigs.k8s.io/kwok/pkg/consts"
@@ -34,25 +33,31 @@ import (
 )
 
 var (
-	testEnv     env.Environment
-	pwd         = os.Getenv("PWD")
-	rootDir     = path.Join(pwd, "../../../..")
-	clusterName = envconf.RandomName("kwok-e2e", 16)
-	namespace   = envconf.RandomName("ns", 16)
-	testImage   = "localhost/kwok:test"
+	runtimeEnv     = consts.RuntimeTypePodman
+	testEnv        env.Environment
+	updateTestdata = false
+	pwd            = os.Getenv("PWD")
+	rootDir        = path.Join(pwd, "../../../..")
+	logsDir        = path.Join(rootDir, "logs")
+	clusterName    = envconf.RandomName("kwok-e2e-podman", 24)
+	namespace      = envconf.RandomName("ns", 16)
+	testImage      = "localhost/kwok:test"
+	kwokctlPath    = path.Join(rootDir, "bin", runtime.GOOS, runtime.GOARCH, "kwokctl"+helper.BinSuffix)
+	baseArgs       = []string{
+		"--kwok-controller-image=" + testImage,
+		"--runtime=" + runtimeEnv,
+		"--enable-metrics-server",
+		"--wait=15m",
+	}
 )
 
 func init() {
 	_ = os.Setenv("KWOK_WORKDIR", path.Join(rootDir, "workdir"))
+	flag.BoolVar(&updateTestdata, "update-testdata", false, "update all of testdata")
 }
 
 func TestMain(m *testing.M) {
-	ctx := context.Background()
-	cfg, _ := envconf.NewFromFlags()
-
-	testEnv, _ = env.NewWithContext(ctx, cfg)
-
-	kwokctlPath := path.Join(rootDir, "bin", runtime.GOOS, runtime.GOARCH, "kwokctl"+helper.BinSuffix)
+	testEnv = helper.Environment()
 
 	k := kwok.NewProvider().
 		WithName(clusterName).
@@ -60,34 +65,22 @@ func TestMain(m *testing.M) {
 	testEnv.Setup(
 		helper.BuildKwokImage(rootDir, testImage, consts.RuntimeTypePodman),
 		helper.BuildKwokctlBinary(rootDir),
-		func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-			kubecfg, err := k.Create(ctx,
-				"--kwok-controller-image", testImage,
-				"--runtime", consts.RuntimeTypePodman,
-			)
-			if err != nil {
-				return ctx, err
-			}
-
-			cfg.WithKubeconfigFile(kubecfg)
-
-			if err := k.WaitForControlPlane(ctx, cfg.Client()); err != nil {
-				return ctx, err
-			}
-
-			return ctx, nil
-		},
-		envfuncs.CreateNamespace(namespace),
+		helper.CreateCluster(k, append(baseArgs,
+			"--controller-port=10247",
+			"--prometheus-port=9090",
+			"--etcd-port=2400",
+			"--kube-scheduler-port=10250",
+			"--kube-controller-manager-port=10260",
+			"--dashboard-port=6060",
+			"--jaeger-port=16686",
+			"--config="+path.Join(rootDir, "test/e2e"),
+			"--config="+path.Join(rootDir, "kustomize/metrics/usage"),
+		)...),
+		helper.CreateNamespace(namespace),
 	)
 	testEnv.Finish(
-		func(ctx context.Context, config *envconf.Config) (context.Context, error) {
-			err := k.Destroy(ctx)
-			if err != nil {
-				return ctx, err
-			}
-
-			return ctx, nil
-		},
+		helper.ExportLogs(k, logsDir),
+		helper.DestroyCluster(k),
 	)
 	os.Exit(testEnv.Run(m))
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,12 +28,14 @@ import (
 	"sort"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 
 	configv1alpha1 "sigs.k8s.io/kwok/pkg/apis/config/v1alpha1"
 	"sigs.k8s.io/kwok/pkg/apis/internalversion"
 	"sigs.k8s.io/kwok/pkg/apis/v1alpha1"
-	"sigs.k8s.io/kwok/pkg/config/compatibility"
 	"sigs.k8s.io/kwok/pkg/log"
 	"sigs.k8s.io/kwok/pkg/utils/file"
 	"sigs.k8s.io/kwok/pkg/utils/maps"
@@ -61,7 +64,7 @@ func loadRawMessages(src []string) ([]json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		r, err := loadRawFromFile(p)
+		r, err := loadRawMessage(p)
 		if err != nil {
 			return nil, err
 		}
@@ -160,6 +163,18 @@ var configHandlers = map[string]configHandler{
 		Marshal:          marshalConfig,
 		MutateToInternal: mutateToInternalConfig(internalversion.ConvertToInternalClusterAttach),
 		MutateToVersiond: mutateToVersiondConfig(internalversion.ConvertToV1Alpha1ClusterAttach),
+	},
+	v1alpha1.ResourceUsageKind: {
+		Unmarshal:        unmarshalConfig[*v1alpha1.ResourceUsage],
+		Marshal:          marshalConfig,
+		MutateToInternal: mutateToInternalConfig(internalversion.ConvertToInternalResourceUsage),
+		MutateToVersiond: mutateToVersiondConfig(internalversion.ConvertToV1Alpha1ResourceUsage),
+	},
+	v1alpha1.ClusterResourceUsageKind: {
+		Unmarshal:        unmarshalConfig[*v1alpha1.ClusterResourceUsage],
+		Marshal:          marshalConfig,
+		MutateToInternal: mutateToInternalConfig(internalversion.ConvertToInternalClusterResourceUsage),
+		MutateToVersiond: mutateToVersiondConfig(internalversion.ConvertToV1Alpha1ClusterResourceUsage),
 	},
 	v1alpha1.MetricKind: {
 		Unmarshal:        unmarshalConfig[*v1alpha1.Metric],
@@ -277,26 +292,6 @@ func Load(ctx context.Context, src ...string) ([]InternalObject, error) {
 
 		gvk := meta.GroupVersionKind()
 
-		// Converting old configurations to the latest
-		// TODO: Remove this in the future
-		if gvk.Version == "" && gvk.Group == "" && gvk.Kind == "" {
-			conf := compatibility.Config{}
-			err = json.Unmarshal(raw, &conf)
-			if err != nil {
-				logger.Error("Unsupported config", err,
-					"src", src,
-				)
-				continue
-			}
-			obj, ok := compatibility.Convert_Config_To_internalversion_KwokctlConfiguration(&conf)
-			if ok {
-				logger.Debug("Convert old config",
-					"src", src,
-				)
-				return []InternalObject{obj}, nil
-			}
-		}
-
 		handler, ok := configHandlers[gvk.Kind]
 		if !ok {
 			logger.Warn("Unsupported type",
@@ -332,6 +327,27 @@ func Load(ctx context.Context, src ...string) ([]InternalObject, error) {
 			return nil, err
 		}
 		objs = append(objs, internalObjs...)
+	}
+
+	return objs, nil
+}
+
+// LoadUnstructured loads the given path into the context.
+func LoadUnstructured(src ...string) ([]InternalObject, error) {
+	raws, err := loadRawMessages(src)
+	if err != nil {
+		return nil, err
+	}
+
+	objs := []InternalObject{}
+	for _, raw := range raws {
+		obj := unstructured.Unstructured{}
+		err := json.Unmarshal(raw, &obj)
+		if err != nil {
+			return nil, err
+		}
+
+		objs = append(objs, &obj)
 	}
 
 	return objs, nil
@@ -517,6 +533,18 @@ func FilterWithoutTypeFromContext[T InternalObject](ctx context.Context) (out []
 	return FilterWithoutType[T](objs)
 }
 
+func loadRawMessage(uri string) ([]json.RawMessage, error) {
+	stat, err := os.Stat(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	if stat.IsDir() {
+		return loadRawFromKustomize(uri)
+	}
+	return loadRawFromFile(uri)
+}
+
 func loadRawFromFile(p string) ([]json.RawMessage, error) {
 	file, err := os.Open(p)
 	if err != nil {
@@ -526,6 +554,23 @@ func loadRawFromFile(p string) ([]json.RawMessage, error) {
 		_ = file.Close()
 	}()
 	return loadRaw(file)
+}
+
+func loadRawFromKustomize(dir string) ([]json.RawMessage, error) {
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fs := filesys.MakeFsOnDisk()
+
+	objs, err := k.Run(fs, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	config, err := objs.AsYaml()
+	if err != nil {
+		return nil, err
+	}
+
+	return loadRaw(bytes.NewReader(config))
 }
 
 func loadRaw(r io.Reader) ([]json.RawMessage, error) {

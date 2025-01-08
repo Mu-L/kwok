@@ -35,3 +35,15 @@ func TestPod(t *testing.T) {
 		Feature()
 	testEnv.Test(t, f0)
 }
+
+func TestStage(t *testing.T) {
+	f0 := e2e.CaseStage().
+		Feature()
+	testEnv.Test(t, f0)
+}
+
+func TestJsonpatch(t *testing.T) {
+	f0 := e2e.CaseJsonpatch(envconf.RandomName("node", 16), namespace).
+		Feature()
+	testEnv.Test(t, f0)
+}

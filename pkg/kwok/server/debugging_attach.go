@@ -22,11 +22,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/emicklei/go-restful/v3"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	remotecommandconsts "k8s.io/apimachinery/pkg/util/remotecommand"
 	remotecommandclient "k8s.io/client-go/tools/remotecommand"
+	crilogs "k8s.io/cri-client/pkg/logs"
 	remotecommandserver "k8s.io/kubelet/pkg/cri/streaming/remotecommand"
 
 	"sigs.k8s.io/kwok/pkg/apis/internalversion"
@@ -42,16 +45,16 @@ func (s *Server) AttachContainer(ctx context.Context, name string, uid types.UID
 		return fmt.Errorf("invalid pod name %q", name)
 	}
 	podName, podNamespace := pod[0], pod[1]
-	attach, err := s.getPodAttach(podName, podNamespace, containerName)
+	attach, err := getPodAttach(s.attaches.Get(), s.clusterAttaches.Get(), podName, podNamespace, containerName)
 	if err != nil {
 		return err
 	}
-	opts := &logOptions{
-		tail:      0,
-		bytes:     -1, // -1 by default which means read all logs.
-		follow:    true,
-		timestamp: false,
-	}
+
+	var tailLines int64
+	opts := crilogs.NewLogOptions(&corev1.PodLogOptions{
+		TailLines: &tailLines,
+		Follow:    true,
+	}, time.Now())
 	return readLogs(ctx, attach.LogsFile, opts, out, errOut)
 }
 
@@ -78,8 +81,8 @@ func (s *Server) getAttach(req *restful.Request, resp *restful.Response) {
 	)
 }
 
-func (s *Server) getPodAttach(podName, podNamespace, containerName string) (*internalversion.AttachConfig, error) {
-	a, has := slices.Find(s.attaches.Get(), func(a *internalversion.Attach) bool {
+func getPodAttach(rules []*internalversion.Attach, clusterRules []*internalversion.ClusterAttach, podName, podNamespace, containerName string) (*internalversion.AttachConfig, error) {
+	a, has := slices.Find(rules, func(a *internalversion.Attach) bool {
 		return a.Name == podName && a.Namespace == podNamespace
 	})
 	if has {
@@ -87,17 +90,17 @@ func (s *Server) getPodAttach(podName, podNamespace, containerName string) (*int
 		if found {
 			return a, nil
 		}
-		return nil, fmt.Errorf("not found log target for container %q in pod %q", containerName, log.KRef(podNamespace, podName))
+		return nil, fmt.Errorf("attaches target not found for container %q in pod %q", containerName, log.KRef(podNamespace, podName))
 	}
 
-	for _, cl := range s.clusterAttaches.Get() {
+	for _, cl := range clusterRules {
 		if !cl.Spec.Selector.Match(podName, podNamespace) {
 			continue
 		}
 
-		log, found := findAttachInAttaches(containerName, cl.Spec.Attaches)
+		a, found := findAttachInAttaches(containerName, cl.Spec.Attaches)
 		if found {
-			return log, nil
+			return a, nil
 		}
 	}
 

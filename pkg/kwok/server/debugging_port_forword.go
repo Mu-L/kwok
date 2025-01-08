@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/kwok/pkg/apis/internalversion"
 	"sigs.k8s.io/kwok/pkg/log"
 	"sigs.k8s.io/kwok/pkg/utils/exec"
+	utilsnet "sigs.k8s.io/kwok/pkg/utils/net"
 	"sigs.k8s.io/kwok/pkg/utils/slices"
 )
 
@@ -47,7 +48,7 @@ func (s *Server) PortForward(ctx context.Context, name string, uid types.UID, po
 	}
 	podName, podNamespace := pod[0], pod[1]
 
-	forward, err := s.getPodsForward(podName, podNamespace, port)
+	forward, err := getPodsForward(s.portForwards.Get(), s.clusterPortForwards.Get(), podName, podNamespace, port)
 	if err != nil {
 		return err
 	}
@@ -74,7 +75,7 @@ func (s *Server) PortForward(ctx context.Context, name string, uid types.UID, po
 			s.bufPool.Put(buf1)
 			s.bufPool.Put(buf2)
 		}()
-		return tunnel(ctx, stream, dial, buf1, buf2)
+		return utilsnet.Tunnel(ctx, stream, dial, buf1, buf2)
 	}
 
 	return errors.New("no target or command")
@@ -106,8 +107,8 @@ func (s *Server) getPortForward(req *restful.Request, resp *restful.Response) {
 	)
 }
 
-func (s *Server) getPodsForward(podName, podNamespace string, port int32) (*internalversion.Forward, error) {
-	pf, has := slices.Find(s.portForwards.Get(), func(pf *internalversion.PortForward) bool {
+func getPodsForward(rules []*internalversion.PortForward, clusterRules []*internalversion.ClusterPortForward, podName, podNamespace string, port int32) (*internalversion.Forward, error) {
+	pf, has := slices.Find(rules, func(pf *internalversion.PortForward) bool {
 		return pf.Name == podName && pf.Namespace == podNamespace
 	})
 	if has {
@@ -118,7 +119,7 @@ func (s *Server) getPodsForward(podName, podNamespace string, port int32) (*inte
 		return nil, fmt.Errorf("forward not found for port %d in pod %q", port, log.KRef(podNamespace, podName))
 	}
 
-	for _, cfw := range s.clusterPortForwards.Get() {
+	for _, cfw := range clusterRules {
 		if !cfw.Spec.Selector.Match(podName, podNamespace) {
 			continue
 		}
@@ -143,38 +144,4 @@ func findPortInForwards(port int32, forwards []internalversion.Forward) (*intern
 		}
 	}
 	return defaultForward, defaultForward != nil
-}
-
-// tunnel create tunnels for two streams.
-func tunnel(ctx context.Context, c1, c2 io.ReadWriter, buf1, buf2 []byte) error {
-	errCh := make(chan error)
-	go func() {
-		_, err := io.CopyBuffer(c2, c1, buf1)
-		errCh <- err
-	}()
-	go func() {
-		_, err := io.CopyBuffer(c1, c2, buf2)
-		errCh <- err
-	}()
-	select {
-	case <-ctx.Done():
-		// Do nothing
-	case err1 := <-errCh:
-		select {
-		case <-ctx.Done():
-			if err1 != nil {
-				return err1
-			}
-			// Do nothing
-		case err2 := <-errCh:
-			if err1 != nil {
-				return err1
-			}
-			return err2
-		}
-	}
-	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	return nil
 }

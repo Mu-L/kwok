@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/kwok/pkg/config/resources"
 	"sigs.k8s.io/kwok/pkg/log"
 	"sigs.k8s.io/kwok/pkg/utils/informer"
+	"sigs.k8s.io/kwok/pkg/utils/lifecycle"
 	"sigs.k8s.io/kwok/pkg/utils/slices"
 	"sigs.k8s.io/kwok/pkg/utils/wait"
 )
@@ -190,7 +191,7 @@ func TestPodController(t *testing.T) {
 		t.Fatal(fmt.Errorf("failed to watch nodes: %w", err))
 	}
 
-	lifecycle, _ := NewLifecycle(podStages)
+	lc, _ := lifecycle.NewLifecycle(podStages)
 	annotationSelector, _ := labels.Parse("fake=custom")
 	pods, err := NewPodController(PodControllerConfig{
 		TypedClient:                           clientset,
@@ -198,9 +199,8 @@ func TestPodController(t *testing.T) {
 		NodeIP:                                defaultNodeIP,
 		CIDR:                                  defaultPodCIDR,
 		DisregardStatusWithAnnotationSelector: annotationSelector.String(),
-		Lifecycle:                             resources.NewStaticGetter(lifecycle),
+		Lifecycle:                             resources.NewStaticGetter(lc),
 		NodeGetFunc:                           nodeGetFunc,
-		FuncMap:                               defaultFuncMap,
 		PlayStageParallelism:                  2,
 	})
 	if err != nil {
@@ -253,6 +253,7 @@ func TestPodController(t *testing.T) {
 		}
 	}
 
+	time.Sleep(1 * time.Second)
 	_, err = clientset.CoreV1().Pods("default").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "pod1",
@@ -316,7 +317,7 @@ func TestPodController(t *testing.T) {
 			}
 		}
 		return true, nil
-	}, wait.WithContinueOnError(10))
+	}, wait.WithContinueOnError(5))
 	if err != nil {
 		t.Fatal(err)
 	}

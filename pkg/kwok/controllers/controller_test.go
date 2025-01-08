@@ -94,10 +94,12 @@ func TestController(t *testing.T) {
 		{
 			name: "node controller test: manage all nodes",
 			conf: Config{
-				TypedClient:              fake.NewSimpleClientset(nodes...),
-				ManageAllNodes:           true,
-				NodeStages:               nodeStages,
-				PodStages:                podStages,
+				TypedClient:    fake.NewSimpleClientset(nodes...),
+				ManageAllNodes: true,
+				LocalStages: map[internalversion.StageResourceRef][]*internalversion.Stage{
+					podRef:  podStages,
+					nodeRef: nodeStages,
+				},
 				CIDR:                     "10.0.0.1/24",
 				NodePlayStageParallelism: 1,
 				PodPlayStageParallelism:  1,
@@ -114,11 +116,13 @@ func TestController(t *testing.T) {
 			conf: Config{
 				TypedClient:                  fake.NewSimpleClientset(nodes...),
 				ManageNodesWithLabelSelector: "manage-by-kwok",
-				NodeStages:                   nodeStages,
-				PodStages:                    podStages,
-				CIDR:                         "10.0.0.1/24",
-				NodePlayStageParallelism:     1,
-				PodPlayStageParallelism:      1,
+				LocalStages: map[internalversion.StageResourceRef][]*internalversion.Stage{
+					podRef:  podStages,
+					nodeRef: nodeStages,
+				},
+				CIDR:                     "10.0.0.1/24",
+				NodePlayStageParallelism: 1,
+				PodPlayStageParallelism:  1,
 			},
 			wantNodePhase: map[string]corev1.NodePhase{
 				"node-0": corev1.NodeRunning,
@@ -132,11 +136,13 @@ func TestController(t *testing.T) {
 			conf: Config{
 				TypedClient:                       fake.NewSimpleClientset(nodes...),
 				ManageNodesWithAnnotationSelector: "manage-by-kwok=true",
-				NodeStages:                        nodeStages,
-				PodStages:                         podStages,
-				CIDR:                              "10.0.0.1/24",
-				NodePlayStageParallelism:          1,
-				PodPlayStageParallelism:           1,
+				LocalStages: map[internalversion.StageResourceRef][]*internalversion.Stage{
+					podRef:  podStages,
+					nodeRef: nodeStages,
+				},
+				CIDR:                     "10.0.0.1/24",
+				NodePlayStageParallelism: 1,
+				PodPlayStageParallelism:  1,
 			},
 			wantNodePhase: map[string]corev1.NodePhase{
 				"node-0": corev1.NodePending,
@@ -168,7 +174,7 @@ func TestController(t *testing.T) {
 
 			// wait for nodes to be right phase indicated by `tt.wantNodePhase`
 			err = wait.Poll(ctx, func(ctx context.Context) (done bool, err error) {
-				list, err := ctr.typedClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+				list, err := ctr.conf.TypedClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 				if err != nil {
 					return false, fmt.Errorf("failed to list nodes, err: %w", err)
 				}

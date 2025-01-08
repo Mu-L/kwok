@@ -196,15 +196,16 @@ func setKwokctlConfigurationDefaults(config *configv1alpha1.KwokctlConfiguration
 	if conf.Runtime == "" && len(conf.Runtimes) == 0 {
 		conf.Runtimes = []string{
 			consts.RuntimeTypeDocker,
+			consts.RuntimeTypePodman,
 		}
 		if GOOS == linux {
-			// TODO: Move to above after test coverage
 			conf.Runtimes = append(conf.Runtimes,
-				consts.RuntimeTypePodman,
 				consts.RuntimeTypeNerdctl,
-				consts.RuntimeTypeBinary,
 			)
 		}
+		conf.Runtimes = append(conf.Runtimes,
+			consts.RuntimeTypeBinary,
+		)
 	}
 	if conf.Runtime == "" && len(conf.Runtimes) == 1 {
 		conf.Runtime = conf.Runtimes[0]
@@ -238,13 +239,13 @@ func setKwokctlConfigurationDefaults(config *configv1alpha1.KwokctlConfiguration
 
 	setKwokctlKindConfig(conf)
 
-	setKwokctlDockerConfig(conf)
-
 	setKwokctlDashboardConfig(conf)
 
 	setKwokctlPrometheusConfig(conf)
 
 	setKwokctlJaegerConfig(conf)
+
+	setMetricsServerConfig(conf)
 
 	return config
 }
@@ -252,11 +253,21 @@ func setKwokctlConfigurationDefaults(config *configv1alpha1.KwokctlConfiguration
 func setKwokctlKubernetesConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
 	conf.DisableKubeScheduler = format.Ptr(envs.GetEnvWithPrefix("DISABLE_KUBE_SCHEDULER", *conf.DisableKubeScheduler))
 	conf.DisableKubeControllerManager = format.Ptr(envs.GetEnvWithPrefix("DISABLE_KUBE_CONTROLLER_MANAGER", *conf.DisableKubeControllerManager))
+	if len(conf.Components) == 0 {
+		conf.Components = []string{
+			consts.ComponentEtcd,
+			consts.ComponentKubeApiserver,
+			consts.ComponentKubeControllerManager,
+			consts.ComponentKubeScheduler,
+			consts.ComponentKwokController,
+		}
+	}
 
 	conf.KubeAuthorization = format.Ptr(envs.GetEnvWithPrefix("KUBE_AUTHORIZATION", *conf.KubeAuthorization))
 	conf.KubeAdmission = envs.GetEnvWithPrefix("KUBE_ADMISSION", conf.KubeAdmission)
 
 	conf.KubeApiserverPort = envs.GetEnvWithPrefix("KUBE_APISERVER_PORT", conf.KubeApiserverPort)
+	conf.KubeApiserverInsecurePort = envs.GetEnvWithPrefix("KUBE_APISERVER_INSECURE_PORT", conf.KubeApiserverInsecurePort)
 
 	if conf.KubeFeatureGates == "" {
 		if conf.Mode == configv1alpha1.ModeStableFeatureGateAndAPI {
@@ -274,13 +285,22 @@ func setKwokctlKubernetesConfig(conf *configv1alpha1.KwokctlConfigurationOptions
 
 	conf.KubeAuditPolicy = envs.GetEnvWithPrefix("KUBE_AUDIT_POLICY", conf.KubeAuditPolicy)
 
+	kubectlBinaryPrefix := conf.KubeBinaryPrefix
 	if conf.KubeBinaryPrefix == "" {
-		conf.KubeBinaryPrefix = consts.KubeBinaryPrefix + "/" + conf.KubeVersion + "/bin/" + GOOS + "/" + GOARCH
+		// https://www.downloadkubernetes.com/
+		// No provided for control plane components outside of Linux,
+		// but kubectl is an exception.
+		kubectlBinaryPrefix = consts.KubeBinaryPrefix + "/" + conf.KubeVersion + "/bin/" + GOOS + "/" + GOARCH
+		if GOOS == linux {
+			conf.KubeBinaryPrefix = kubectlBinaryPrefix
+		} else {
+			conf.KubeBinaryPrefix = consts.KubeBinaryUnofficialPrefix + "/" + conf.KubeVersion + "-kwok.0-" + GOOS + "-" + GOARCH
+		}
 	}
 	conf.KubeBinaryPrefix = envs.GetEnvWithPrefix("KUBE_BINARY_PREFIX", conf.KubeBinaryPrefix)
 
 	if conf.KubectlBinary == "" {
-		conf.KubectlBinary = conf.KubeBinaryPrefix + "/kubectl" + conf.BinSuffix
+		conf.KubectlBinary = kubectlBinaryPrefix + "/kubectl" + conf.BinSuffix
 	}
 	conf.KubectlBinary = envs.GetEnvWithPrefix("KUBECTL_BINARY", conf.KubectlBinary)
 
@@ -320,6 +340,11 @@ func setKwokctlKubernetesConfig(conf *configv1alpha1.KwokctlConfigurationOptions
 		conf.KubeSchedulerImage = joinImageURI(conf.KubeImagePrefix, "kube-scheduler", conf.KubeVersion)
 	}
 	conf.KubeSchedulerImage = envs.GetEnvWithPrefix("KUBE_SCHEDULER_IMAGE", conf.KubeSchedulerImage)
+
+	if conf.KubectlImage == "" {
+		conf.KubectlImage = joinImageURI(conf.KubeImagePrefix, "kubectl", conf.KubeVersion)
+	}
+	conf.KubectlImage = envs.GetEnvWithPrefix("KUBECTL_IMAGE", conf.KubectlImage)
 
 	conf.KubeSchedulerPort = envs.GetEnvWithPrefix("KUBE_SCHEDULER_PORT", conf.KubeSchedulerPort)
 }
@@ -381,6 +406,14 @@ func setKwokctlEtcdConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
 	conf.EtcdImage = envs.GetEnvWithPrefix("ETCD_IMAGE", conf.EtcdImage)
 
 	conf.EtcdPort = envs.GetEnvWithPrefix("ETCD_PORT", conf.EtcdPort)
+
+	if conf.EtcdBinary == "" {
+		conf.EtcdBinary = conf.EtcdBinaryTar + "#etcd" + conf.BinSuffix
+	}
+
+	if conf.EtcdctlBinary == "" {
+		conf.EtcdctlBinary = conf.EtcdBinaryTar + "#etcdctl" + conf.BinSuffix
+	}
 }
 
 func setKwokctlKindConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
@@ -410,23 +443,6 @@ func setKwokctlKindConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
 	conf.KindBinary = envs.GetEnvWithPrefix("KIND_BINARY", conf.KindBinary)
 }
 
-func setKwokctlDockerConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
-	if conf.DockerComposeVersion == "" {
-		conf.DockerComposeVersion = consts.DockerComposeVersion
-	}
-	conf.DockerComposeVersion = version.AddPrefixV(envs.GetEnvWithPrefix("DOCKER_COMPOSE_VERSION", conf.DockerComposeVersion))
-
-	if conf.DockerComposeBinaryPrefix == "" {
-		conf.DockerComposeBinaryPrefix = consts.DockerComposeBinaryPrefix + "/" + conf.DockerComposeVersion
-	}
-	conf.DockerComposeBinaryPrefix = envs.GetEnvWithPrefix("DOCKER_COMPOSE_BINARY_PREFIX", conf.DockerComposeBinaryPrefix)
-
-	if conf.DockerComposeBinary == "" {
-		conf.DockerComposeBinary = conf.DockerComposeBinaryPrefix + "/docker-compose-" + GOOS + "-" + archAlias(GOARCH) + conf.BinSuffix
-	}
-	conf.DockerComposeBinary = envs.GetEnvWithPrefix("DOCKER_COMPOSE_BINARY", conf.DockerComposeBinary)
-}
-
 func setKwokctlDashboardConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
 	if conf.DashboardVersion == "" {
 		conf.DashboardVersion = consts.DashboardVersion
@@ -442,6 +458,16 @@ func setKwokctlDashboardConfig(conf *configv1alpha1.KwokctlConfigurationOptions)
 		conf.DashboardImage = joinImageURI(conf.DashboardImagePrefix, "dashboard", conf.DashboardVersion)
 	}
 	conf.DashboardImage = envs.GetEnvWithPrefix("DASHBOARD_IMAGE", conf.DashboardImage)
+
+	if conf.DashboardMetricsScraperVersion == "" {
+		conf.DashboardMetricsScraperVersion = consts.DashboardMetricsScraperVersion
+	}
+	conf.DashboardMetricsScraperVersion = version.AddPrefixV(envs.GetEnvWithPrefix("DASHBOARD_METRICS_SCRAPER_VERSION", conf.DashboardMetricsScraperVersion))
+
+	if conf.DashboardMetricsScraperImage == "" {
+		conf.DashboardMetricsScraperImage = joinImageURI(conf.DashboardImagePrefix, "metrics-scraper", conf.DashboardMetricsScraperVersion)
+	}
+	conf.DashboardMetricsScraperImage = envs.GetEnvWithPrefix("DASHBOARD_METRICS_SCRAPER_IMAGE", conf.DashboardMetricsScraperImage)
 
 	// TODO: Add dashboard binary
 	// if conf.DashboardBinaryPrefix == "" {
@@ -489,6 +515,10 @@ func setKwokctlPrometheusConfig(conf *configv1alpha1.KwokctlConfigurationOptions
 		}()
 	}
 	conf.PrometheusBinaryTar = envs.GetEnvWithPrefix("PROMETHEUS_BINARY_TAR", conf.PrometheusBinaryTar)
+
+	if conf.PrometheusBinary == "" {
+		conf.PrometheusBinary = conf.PrometheusBinaryTar + "#prometheus" + conf.BinSuffix
+	}
 }
 
 func setKwokctlJaegerConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
@@ -525,6 +555,38 @@ func setKwokctlJaegerConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
 		}()
 	}
 	conf.JaegerBinaryTar = envs.GetEnvWithPrefix("JAEGER_BINARY_TAR", conf.JaegerBinaryTar)
+
+	if conf.JaegerBinary == "" {
+		conf.JaegerBinary = conf.JaegerBinaryTar + "#jaeger-all-in-one" + conf.BinSuffix
+	}
+}
+
+func setMetricsServerConfig(conf *configv1alpha1.KwokctlConfigurationOptions) {
+	if conf.MetricsServerVersion == "" {
+		conf.MetricsServerVersion = consts.MetricsServerVersion
+	}
+	conf.MetricsServerVersion = version.AddPrefixV(envs.GetEnvWithPrefix("METRICS_SERVER_VERSION", conf.MetricsServerVersion))
+
+	if conf.MetricsServerImagePrefix == "" {
+		conf.MetricsServerImagePrefix = consts.MetricsServerImagePrefix
+	}
+	conf.MetricsServerImagePrefix = envs.GetEnvWithPrefix("METRICS_SERVER_IMAGE_PREFIX", conf.MetricsServerImagePrefix)
+
+	if conf.MetricsServerImage == "" {
+		conf.MetricsServerImage = joinImageURI(conf.MetricsServerImagePrefix, "metrics-server", version.AddPrefixV(conf.MetricsServerVersion))
+	}
+	conf.MetricsServerImage = envs.GetEnvWithPrefix("METRICS_SERVER_IMAGE", conf.MetricsServerImage)
+
+	if conf.MetricsServerBinaryPrefix == "" {
+		conf.MetricsServerBinaryPrefix = consts.MetricsServerBinaryPrefix + "/" + conf.MetricsServerVersion
+	}
+	conf.MetricsServerBinaryPrefix = envs.GetEnvWithPrefix("METRICS_SERVER_BINARY_PREFIX", conf.MetricsServerBinaryPrefix)
+
+	if conf.MetricsServerBinaryPrefix != "" &&
+		conf.MetricsServerBinary == "" {
+		conf.MetricsServerBinary = conf.MetricsServerBinaryPrefix + "/metrics-server-" + GOOS + "-" + GOARCH + conf.BinSuffix
+	}
+	conf.MetricsServerBinary = envs.GetEnvWithPrefix("METRICS_SERVER_BINARY", conf.MetricsServerBinary)
 }
 
 // joinImageURI joins the image URI.
@@ -539,19 +601,4 @@ func parseRelease(ver string) int {
 		return -1
 	}
 	return int(v.Minor)
-}
-
-var archMapping = map[string]string{
-	"arm64": "aarch64",
-	"arm":   "armv7",
-	"amd64": "x86_64",
-	"386":   "x86",
-}
-
-// archAlias returns the alias of the given arch
-func archAlias(arch string) string {
-	if v, ok := archMapping[arch]; ok {
-		return v
-	}
-	return arch
 }

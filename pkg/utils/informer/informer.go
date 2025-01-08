@@ -18,14 +18,15 @@ package informer
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/pager"
-
-	"sigs.k8s.io/kwok/pkg/log"
 )
 
 // Informer is a wrapper around a Get/List/Watch function.
@@ -44,6 +45,9 @@ func NewInformer[T runtime.Object, L runtime.Object](lw Watcher[T, L]) *Informer
 
 // Sync sends a sync event for each resource returned by the ListFunc.
 func (i *Informer[T, L]) Sync(ctx context.Context, opt Option, events chan<- Event[T]) error {
+	if events == nil {
+		return fmt.Errorf("events channel is nil")
+	}
 	listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 		return i.ListFunc(ctx, opts)
 	})
@@ -63,27 +67,54 @@ func (i *Informer[T, L]) Sync(ctx context.Context, opt Option, events chan<- Eve
 	return nil
 }
 
+func (i *Informer[T, L]) listWatch(ctx context.Context) *cache.ListWatch {
+	return &cache.ListWatch{
+		ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+			return i.ListFunc(ctx, opts)
+		},
+		WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
+			return i.WatchFunc(ctx, opts)
+		},
+	}
+}
+
+// WatchWithLazyCache starts a goroutine that watches the resource and sends events to the events channel.
+func (i *Informer[T, L]) WatchWithLazyCache(ctx context.Context, opt Option, events chan<- Event[T]) (Getter[T], error) {
+	lw := i.listWatch(ctx)
+
+	dummyCtx, dummyCancel := context.WithCancel(ctx)
+
+	dummyInformer := newDummyInformer(lw, opt, events)
+	go dummyInformer.Run(dummyCtx.Done())
+
+	l := &lazyGetter[T]{
+		initStore: func() cache.Store {
+			dummyCancel()
+
+			c, controller := newCacheInformer(lw, opt, events)
+			go controller.Run(ctx.Done())
+			return c
+		},
+	}
+	return l, nil
+}
+
 // WatchWithCache starts a goroutine that watches the resource and sends events to the events channel.
 func (i *Informer[T, L]) WatchWithCache(ctx context.Context, opt Option, events chan<- Event[T]) (Getter[T], error) {
+	store, controller := newCacheInformer[T](i.listWatch(ctx), opt, events)
+	go controller.Run(ctx.Done())
+
+	g := &getter[T]{store: store}
+	return g, nil
+}
+
+func newCacheInformer[T runtime.Object](listWatch cache.ListerWatcher, opt Option, events chan<- Event[T]) (cache.Store, cache.Controller) {
 	var t T
-	logger := log.FromContext(ctx)
-	store, contrtoller := cache.NewInformer(
-		&cache.ListWatch{
-			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
-				opt.setup(&opts)
-				return i.ListFunc(ctx, opts)
-			},
-			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
-				opt.setup(&opts)
-				return i.WatchFunc(ctx, opts)
-			},
-		},
-		t,
-		0,
-		cache.ResourceEventHandlerFuncs{
+	eventHandler := cache.ResourceEventHandlerFuncs{}
+	if events != nil {
+		eventHandler = cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj any) {
 				if ok, err := opt.filter(obj); err != nil {
-					logger.Error("filtering object", err)
 					return
 				} else if !ok {
 					return
@@ -92,7 +123,6 @@ func (i *Informer[T, L]) WatchWithCache(ctx context.Context, opt Option, events 
 			},
 			UpdateFunc: func(oldObj, newObj any) {
 				if ok, err := opt.filter(newObj); err != nil {
-					logger.Error("filtering object", err)
 					return
 				} else if !ok {
 					return
@@ -101,42 +131,62 @@ func (i *Informer[T, L]) WatchWithCache(ctx context.Context, opt Option, events 
 			},
 			DeleteFunc: func(obj any) {
 				if ok, err := opt.filter(obj); err != nil {
-					logger.Error("filtering object", err)
 					return
 				} else if !ok {
 					return
 				}
 				events <- Event[T]{Type: Deleted, Object: obj.(T)}
 			},
+		}
+	}
+	store, controller := cache.NewInformerWithOptions(cache.InformerOptions{
+		ListerWatcher: &cache.ListWatch{
+			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+				opt.setup(&opts)
+				return listWatch.List(opts)
+			},
+			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
+				opt.setup(&opts)
+				return listWatch.Watch(opts)
+			},
 		},
-	)
+		ObjectType: objType(t),
+		Handler:    eventHandler,
+	})
 
-	go contrtoller.Run(ctx.Done())
-
-	g := &getter[T]{store: store}
-	return g, nil
+	return store, controller
 }
 
 // Watch starts a goroutine that watches the resource and sends events to the events channel.
 func (i *Informer[T, L]) Watch(ctx context.Context, opt Option, events chan<- Event[T]) error {
+	if events == nil {
+		return fmt.Errorf("events channel is nil")
+	}
+
+	informer := newDummyInformer(i.listWatch(ctx), opt, events)
+	go informer.Run(ctx.Done())
+
+	return nil
+}
+
+func newDummyInformer[T runtime.Object](listWatch cache.ListerWatcher, opt Option, events chan<- Event[T]) *cache.Reflector {
 	var t T
 	informer := cache.NewReflectorWithOptions(
 		&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				opt.setup(&opts)
-				return i.ListFunc(ctx, opts)
+				return listWatch.List(opts)
 			},
 			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
 				opt.setup(&opts)
-				return i.WatchFunc(ctx, opts)
+				return listWatch.Watch(opts)
 			},
 		},
-		t,
+		objType(t),
 		dummyCache(events, opt),
 		cache.ReflectorOptions{},
 	)
-	go informer.Run(ctx.Done())
-	return nil
+	return informer
 }
 
 func dummyCache[T runtime.Object](ch chan<- Event[T], opt Option) cache.Store {
@@ -228,4 +278,49 @@ func (g *getter[T]) List() (list []T) {
 		list = append(list, obj.(T))
 	}
 	return list
+}
+
+type lazyGetter[T runtime.Object] struct {
+	store cache.Store
+
+	onceInit  sync.Once
+	initStore func() cache.Store
+}
+
+func (l *lazyGetter[T]) init() {
+	l.store = l.initStore()
+}
+
+func (l *lazyGetter[T]) Get(name string) (t T, exists bool) {
+	l.onceInit.Do(l.init)
+	obj, exists, err := l.store.GetByKey(name)
+	if err != nil {
+		return t, false
+	}
+	if !exists {
+		return t, false
+	}
+	return obj.(T), true
+}
+
+func (l *lazyGetter[T]) GetWithNamespace(name, namespace string) (t T, exists bool) {
+	return l.Get(namespace + "/" + name)
+}
+
+func (l *lazyGetter[T]) List() (list []T) {
+	l.onceInit.Do(l.init)
+	for _, obj := range l.store.List() {
+		list = append(list, obj.(T))
+	}
+	return list
+}
+
+func objType(expectedType runtime.Object) runtime.Object {
+	switch expectedType.(type) {
+	default:
+		return expectedType
+	case *unstructured.Unstructured:
+		var obj unstructured.Unstructured
+		return &obj
+	}
 }

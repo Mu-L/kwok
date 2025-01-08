@@ -29,6 +29,8 @@ type Queue[T any] interface {
 	Get() (T, bool)
 	// GetOrWait returns an item from the queue or waits until an item is added.
 	GetOrWait() T
+	// GetOrWaitWithDone returns an item from the queue or waits until an item is added or the done channel is closed.
+	GetOrWaitWithDone(done <-chan struct{}) (T, bool)
 	// Len returns the number of items in the queue.
 	Len() int
 }
@@ -38,7 +40,7 @@ type queue[T any] struct {
 	base *list.List
 
 	signal chan struct{}
-	mut    sync.Mutex
+	mut    sync.RWMutex
 }
 
 // NewQueue returns a new Queue.
@@ -51,16 +53,13 @@ func NewQueue[T any]() Queue[T] {
 
 func (q *queue[T]) Add(item T) {
 	q.mut.Lock()
-	defer q.mut.Unlock()
-
 	q.base.PushBack(item)
+	q.mut.Unlock()
 
 	// Signal that an item was added.
-	if len(q.signal) == 0 {
-		select {
-		case q.signal <- struct{}{}:
-		default:
-		}
+	select {
+	case q.signal <- struct{}{}:
+	default:
 	}
 }
 
@@ -91,8 +90,28 @@ func (q *queue[T]) GetOrWait() T {
 	panic("unreachable")
 }
 
+func (q *queue[T]) GetOrWaitWithDone(done <-chan struct{}) (T, bool) {
+	t, ok := q.Get()
+	if ok {
+		return t, ok
+	}
+
+	// Wait for an item to be added.
+	for {
+		select {
+		case <-done:
+			return t, false
+		case <-q.signal:
+			t, ok = q.Get()
+			if ok {
+				return t, true
+			}
+		}
+	}
+}
+
 func (q *queue[T]) Len() int {
-	q.mut.Lock()
-	defer q.mut.Unlock()
+	q.mut.RLock()
+	defer q.mut.RUnlock()
 	return q.base.Len()
 }

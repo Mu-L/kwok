@@ -19,6 +19,8 @@ package helper
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"sigs.k8s.io/kwok/pkg/utils/format"
 )
 
 // PodBuilder is a builder for pod.
@@ -35,10 +37,23 @@ func NewPodBuilder(name string) *PodBuilder {
 				Namespace: "default",
 			},
 			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{
-					Name:  "container",
-					Image: "image",
-				}},
+				InitContainers: []corev1.Container{
+					{
+						Name:  "init",
+						Image: "image",
+					},
+					{
+						Name:          "sidecar",
+						Image:         "image",
+						RestartPolicy: format.Ptr(corev1.ContainerRestartPolicyAlways),
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name:  "container",
+						Image: "image",
+					},
+				},
 			},
 		},
 	}
@@ -59,6 +74,15 @@ func (b PodBuilder) WithNamespace(namespace string) *PodBuilder {
 // WithNodeName will set node name for pod.
 func (b PodBuilder) WithNodeName(nodeName string) *PodBuilder {
 	b.pod.Spec.NodeName = nodeName
+	return &b
+}
+
+// WithAnnotation will set annotation for pod.
+func (b PodBuilder) WithAnnotation(key, value string) *PodBuilder {
+	if b.pod.ObjectMeta.Annotations == nil {
+		b.pod.ObjectMeta.Annotations = map[string]string{}
+	}
+	b.pod.ObjectMeta.Annotations[key] = value
 	return &b
 }
 

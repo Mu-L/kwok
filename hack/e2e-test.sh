@@ -22,22 +22,63 @@ test_dir=$(realpath "${DIR}"/../test)
 TARGETS=()
 SKIPS=()
 
-function all_cases() {
-  cases="$(find "${test_dir}" -name '*.test.sh' | sed "s#^${test_dir}/##g" | sed "s#.test.sh\$##g" | sort)"
-  for skip in "${SKIPS[@]}"; do
-    cases="$(echo "${cases}" | grep -v "${skip}" || :)"
+function filter_skip() {
+  cat | while read -r line; do
+    skip=false
+    for s in "${SKIPS[@]}"; do
+      if [[ "${line}" =~ ${s} ]]; then
+        skip=true
+        break
+      fi
+    done
+    if [[ "${skip}" == false ]]; then
+      echo "${line}"
+    fi
   done
-  echo "${cases}"
-  go test -json -v sigs.k8s.io/kwok/test/e2e/... -args --dry-run |
-    jq -r '. | select( .Action == "pass" ) | select( .Test == null ) | .Package' |
-    sed 's|^sigs.k8s.io/kwok/test/||g'
+}
+
+function shell_cases() {
+  find "${test_dir}" -name '*.test.sh' |
+    sed "s#^${test_dir}/##g" |
+    sed "s#.test.sh\$##g"
+}
+
+function e2e_cases() {
+  find test/e2e -type f -name 'main_test.go' |
+    sed 's|/main_test.go$||g' |
+    sed 's|^test/||g'
+}
+
+function e2e_option_cases() {
+  local files
+  local cases
+  files=$(find test/e2e -type f -name '*_test.go' -not -name 'main_test.go')
+  for f in ${files}; do
+    cases=$(grep "^func Test" <"${f}" | sed 's|(.*||g' | sed 's|^func Test||g')
+    f="${f%\/*}"
+    f="${f#*\/}"
+    for c in ${cases}; do
+      echo "${f}@${c}"
+    done
+  done
+}
+
+function all_cases() {
+  shell_cases | filter_skip
+  e2e_cases | filter_skip
 }
 
 function usage() {
   echo "Usage: ${0} [cases...] [--help]"
   echo "  Empty argument will run all cases."
   echo "  CASES:"
-  for c in $(all_cases); do
+  for c in $(shell_cases | filter_skip); do
+    echo "    ${c}"
+  done
+  for c in $(e2e_cases | filter_skip); do
+    echo "    ${c}"
+  done
+  for c in $(e2e_option_cases | filter_skip); do
     echo "    ${c}"
   done
 }
@@ -74,11 +115,27 @@ function args() {
 
 function main() {
   local failed=()
+  local test_case
+  local test_path
   for target in "${TARGETS[@]}"; do
     echo "================================================================================"
     if [[ "${target}" == "e2e/"* ]]; then
       echo "Testing ${target}..."
-      if ! go test -v "sigs.k8s.io/kwok/test/${target}" -args --v=6; then
+      if [[ "${target}" == *"@"* ]]; then
+        test_case="${target##*@}"
+        test_path="${target%@*}"
+        if ! go test -timeout=1h -v -test.v "sigs.k8s.io/kwok/test/${test_path}" -test.run "^Test${test_case}\$" -args --v=6; then
+          failed+=("${target}")
+          echo "------------------------------"
+          echo "Test ${target} failed."
+        else
+          echo "------------------------------"
+          echo "Test ${target} passed."
+        fi
+        continue
+      fi
+
+      if ! go test -timeout=1h -v -test.v "sigs.k8s.io/kwok/test/${target}" -args --v=6; then
         failed+=("${target}")
         echo "------------------------------"
         echo "Test ${target} failed."

@@ -27,6 +27,7 @@ import (
 
 // BuildJaegerComponentConfig is the configuration for building a jaeger component.
 type BuildJaegerComponentConfig struct {
+	Runtime      string
 	Binary       string
 	Image        string
 	Version      version.Version
@@ -35,31 +36,51 @@ type BuildJaegerComponentConfig struct {
 	Port         uint32
 	OtlpGrpcPort uint32
 	Verbosity    log.Level
-	ExtraArgs    []internalversion.ExtraArgs
-	ExtraVolumes []internalversion.Volume
 }
 
 // BuildJaegerComponent builds a jaeger component.
 func BuildJaegerComponent(conf BuildJaegerComponentConfig) (component internalversion.Component, err error) {
 	jaegerArgs := []string{"--collector.otlp.enabled=true"}
-	jaegerArgs = append(jaegerArgs, extraArgsToStrings(conf.ExtraArgs)...)
 
 	var volumes []internalversion.Volume
-	volumes = append(volumes, conf.ExtraVolumes...)
 	var ports []internalversion.Port
 
-	inContainer := conf.Image != ""
-	if inContainer {
-		ports = []internalversion.Port{
-			{
+	if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
+		ports = append(
+			ports,
+			internalversion.Port{
+				Name:     "http",
 				HostPort: conf.Port,
 				Port:     16686,
+				Protocol: internalversion.ProtocolTCP,
 			},
-		}
+			internalversion.Port{
+				Name:     "otlp-grpc",
+				HostPort: conf.OtlpGrpcPort,
+				Port:     4317,
+				Protocol: internalversion.ProtocolTCP,
+			},
+		)
 		jaegerArgs = append(jaegerArgs,
 			"--query.http-server.host-port="+conf.BindAddress+":16686",
+			"--collector.otlp.grpc.host-port="+conf.BindAddress+":4317",
 		)
 	} else {
+		ports = append(
+			ports,
+			internalversion.Port{
+				Name:     "http",
+				HostPort: 0,
+				Port:     conf.Port,
+				Protocol: internalversion.ProtocolTCP,
+			},
+			internalversion.Port{
+				Name:     "otlp-grpc",
+				HostPort: 0,
+				Port:     conf.OtlpGrpcPort,
+				Protocol: internalversion.ProtocolTCP,
+			},
+		)
 		jaegerArgs = append(jaegerArgs,
 			"--query.http-server.host-port="+conf.BindAddress+":"+format.String(conf.Port),
 			"--collector.otlp.grpc.host-port="+net.LocalAddress+":"+format.String(conf.OtlpGrpcPort),

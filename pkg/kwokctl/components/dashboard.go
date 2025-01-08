@@ -25,6 +25,8 @@ import (
 
 // BuildDashboardComponentConfig is the configuration for building the dashboard component.
 type BuildDashboardComponentConfig struct {
+	Runtime     string
+	ProjectName string
 	Binary      string
 	Image       string
 	Version     version.Version
@@ -33,6 +35,8 @@ type BuildDashboardComponentConfig struct {
 	Port        uint32
 
 	Banner string
+
+	EnableMetrics bool
 
 	CaCertPath     string
 	AdminCertPath  string
@@ -49,20 +53,29 @@ func BuildDashboardComponent(conf BuildDashboardComponentConfig) (component inte
 		"--enable-insecure-login",
 		"--enable-skip-login",
 		"--disable-settings-authorizer",
-		"--metrics-provider=none",
 	}
+	if conf.EnableMetrics {
+		switch GetRuntimeMode(conf.Runtime) {
+		case RuntimeModeContainer:
+			dashboardArgs = append(dashboardArgs, "--sidecar-host="+conf.ProjectName+"-"+consts.ComponentDashboardMetricsScraper+":8000")
+		default:
+			dashboardArgs = append(dashboardArgs, "--sidecar-host=127.0.0.1:8000")
+		}
+	} else {
+		dashboardArgs = append(dashboardArgs, "--metrics-provider=none")
+	}
+
 	if conf.Banner != "" {
 		dashboardArgs = append(dashboardArgs, "--system-banner="+conf.Banner)
 	}
 
-	inContainer := conf.Image != ""
 	user := ""
 	var volumes []internalversion.Volume
 	var ports []internalversion.Port
-	if inContainer {
+	if GetRuntimeMode(conf.Runtime) != RuntimeModeNative {
 		dashboardArgs = append(dashboardArgs,
 			"--kubeconfig=/root/.kube/config",
-			"--insecure-port=8000",
+			"--insecure-port=8080",
 		)
 		volumes = append(volumes,
 			internalversion.Volume{
@@ -89,7 +102,7 @@ func BuildDashboardComponent(conf BuildDashboardComponentConfig) (component inte
 		ports = append(ports,
 			internalversion.Port{
 				Name:     "http",
-				Port:     8000,
+				Port:     8080,
 				HostPort: conf.Port,
 				Protocol: internalversion.ProtocolTCP,
 			},
@@ -98,6 +111,14 @@ func BuildDashboardComponent(conf BuildDashboardComponentConfig) (component inte
 		dashboardArgs = append(dashboardArgs,
 			"--kubeconfig="+conf.KubeconfigPath,
 			"--insecure-port="+format.String(conf.Port),
+		)
+		ports = append(ports,
+			internalversion.Port{
+				Name:     "http",
+				Port:     conf.Port,
+				HostPort: 0,
+				Protocol: internalversion.ProtocolTCP,
+			},
 		)
 	}
 

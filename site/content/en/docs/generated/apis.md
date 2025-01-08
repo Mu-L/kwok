@@ -6,12 +6,124 @@ bookToc: false
 <p>Packages:</p>
 <ul>
 <li>
+<a href="#action.kwok.x-k8s.io%2fv1alpha1">action.kwok.x-k8s.io/v1alpha1</a>
+</li>
+<li>
 <a href="#config.kwok.x-k8s.io%2fv1alpha1">config.kwok.x-k8s.io/v1alpha1</a>
 </li>
 <li>
 <a href="#kwok.x-k8s.io%2fv1alpha1">kwok.x-k8s.io/v1alpha1</a>
 </li>
 </ul>
+<h2 id="action.kwok.x-k8s.io/v1alpha1">
+action.kwok.x-k8s.io/v1alpha1
+<a href="#action.kwok.x-k8s.io%2fv1alpha1"> #</a>
+</h2>
+<div>
+<p>Package v1alpha1 implements the v1alpha1 apiVersion of kwokctl&rsquo;s action</p>
+</div>
+Resource Types:
+<ul>
+<li>
+<a href="#action.kwok.x-k8s.io/v1alpha1.ResourcePatch">ResourcePatch</a>
+</li></ul>
+<h3 id="action.kwok.x-k8s.io/v1alpha1.ResourcePatch">
+ResourcePatch
+<a href="#action.kwok.x-k8s.io%2fv1alpha1.ResourcePatch"> #</a>
+</h3>
+<p>
+<p>ResourcePatch provides resource definition for kwokctl.
+this is a action of resource patch.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>apiVersion</code>
+string
+</td>
+<td>
+<code>
+action.kwok.x-k8s.io/v1alpha1
+</code>
+</td>
+</tr>
+<tr>
+<td>
+<code>kind</code>
+string
+</td>
+<td><code>ResourcePatch</code></td>
+</tr>
+<tr>
+<td>
+<code>resource</code>
+<em>
+<a href="#action.kwok.x-k8s.io/v1alpha1.GroupVersionResource">
+GroupVersionResource
+</a>
+</em>
+</td>
+<td>
+<p>Resource represents the resource to be patched.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>target</code>
+<em>
+<a href="#action.kwok.x-k8s.io/v1alpha1.Target">
+Target
+</a>
+</em>
+</td>
+<td>
+<p>Target represents the target of the ResourcePatch.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>durationNanosecond</code>
+<em>
+time.Duration
+</em>
+</td>
+<td>
+<p>DurationNanosecond represents the duration of the patch in nanoseconds.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>method</code>
+<em>
+<a href="#action.kwok.x-k8s.io/v1alpha1.PatchMethod">
+PatchMethod
+</a>
+</em>
+</td>
+<td>
+<p>Method represents the method of the patch.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>template</code>
+<em>
+encoding/json.RawMessage
+</em>
+</td>
+<td>
+<p>Template contains the patch data as a raw JSON message.</p>
+</td>
+</tr>
+</tbody>
+</table>
 <h2 id="config.kwok.x-k8s.io/v1alpha1">
 config.kwok.x-k8s.io/v1alpha1
 <a href="#config.kwok.x-k8s.io%2fv1alpha1"> #</a>
@@ -90,6 +202,19 @@ KwokConfigurationOptions
 </td>
 <td>
 <p>Options holds information about the default value.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>tracing</code>
+<em>
+<a href="#config.kwok.x-k8s.io/v1alpha1.TracingConfiguration">
+TracingConfiguration
+</a>
+</em>
+</td>
+<td>
+<p>Tracing holds tracing configuration.</p>
 </td>
 </tr>
 </tbody>
@@ -295,6 +420,9 @@ Resource Types:
 <a href="#kwok.x-k8s.io/v1alpha1.ClusterPortForward">ClusterPortForward</a>
 </li>
 <li>
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsage">ClusterResourceUsage</a>
+</li>
+<li>
 <a href="#kwok.x-k8s.io/v1alpha1.Exec">Exec</a>
 </li>
 <li>
@@ -305,6 +433,9 @@ Resource Types:
 </li>
 <li>
 <a href="#kwok.x-k8s.io/v1alpha1.PortForward">PortForward</a>
+</li>
+<li>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsage">ResourceUsage</a>
 </li>
 <li>
 <a href="#kwok.x-k8s.io/v1alpha1.Stage">Stage</a>
@@ -821,6 +952,111 @@ ClusterPortForwardStatus
 </tr>
 </tbody>
 </table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ClusterResourceUsage">
+ClusterResourceUsage
+<a href="#kwok.x-k8s.io%2fv1alpha1.ClusterResourceUsage"> #</a>
+</h3>
+<p>
+<p>ClusterResourceUsage provides cluster-wide resource usage.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>apiVersion</code>
+string
+</td>
+<td>
+<code>
+kwok.x-k8s.io/v1alpha1
+</code>
+</td>
+</tr>
+<tr>
+<td>
+<code>kind</code>
+string
+</td>
+<td><code>ClusterResourceUsage</code></td>
+</tr>
+<tr>
+<td>
+<code>metadata</code>
+<em>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta">
+Kubernetes meta/v1.ObjectMeta
+</a>
+</em>
+</td>
+<td>
+<p>Standard list metadata.
+More info: <a href="https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata">https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata</a></p>
+Refer to the Kubernetes API documentation for the fields of the
+<code>metadata</code> field.
+</td>
+</tr>
+<tr>
+<td>
+<code>spec</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsageSpec">
+ClusterResourceUsageSpec
+</a>
+</em>
+</td>
+<td>
+<p>Spec holds spec for cluster resource usage.</p>
+<table>
+<tr>
+<td>
+<code>selector</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ObjectSelector">
+ObjectSelector
+</a>
+</em>
+</td>
+<td>
+<p>Selector is a selector to filter pods to configure.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>usages</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageContainer">
+[]ResourceUsageContainer
+</a>
+</em>
+</td>
+<td>
+<p>Usages is a list of resource usage for the pod.</p>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+<tr>
+<td>
+<code>status</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsageStatus">
+ClusterResourceUsageStatus
+</a>
+</em>
+</td>
+<td>
+<p>Status holds status for cluster resource usage</p>
+</td>
+</tr>
+</tbody>
+</table>
 <h3 id="kwok.x-k8s.io/v1alpha1.Exec">
 Exec
 <a href="#kwok.x-k8s.io%2fv1alpha1.Exec"> #</a>
@@ -1200,6 +1436,98 @@ PortForwardStatus
 </tr>
 </tbody>
 </table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ResourceUsage">
+ResourceUsage
+<a href="#kwok.x-k8s.io%2fv1alpha1.ResourceUsage"> #</a>
+</h3>
+<p>
+<p>ResourceUsage provides resource usage for a single pod.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>apiVersion</code>
+string
+</td>
+<td>
+<code>
+kwok.x-k8s.io/v1alpha1
+</code>
+</td>
+</tr>
+<tr>
+<td>
+<code>kind</code>
+string
+</td>
+<td><code>ResourceUsage</code></td>
+</tr>
+<tr>
+<td>
+<code>metadata</code>
+<em>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta">
+Kubernetes meta/v1.ObjectMeta
+</a>
+</em>
+</td>
+<td>
+<p>Standard list metadata.
+More info: <a href="https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata">https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata</a></p>
+Refer to the Kubernetes API documentation for the fields of the
+<code>metadata</code> field.
+</td>
+</tr>
+<tr>
+<td>
+<code>spec</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageSpec">
+ResourceUsageSpec
+</a>
+</em>
+</td>
+<td>
+<p>Spec holds spec for resource usage.</p>
+<table>
+<tr>
+<td>
+<code>usages</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageContainer">
+[]ResourceUsageContainer
+</a>
+</em>
+</td>
+<td>
+<p>Usages is a list of resource usage for the pod.</p>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+<tr>
+<td>
+<code>status</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageStatus">
+ResourceUsageStatus
+</a>
+</em>
+</td>
+<td>
+<p>Status holds status for resource usage</p>
+</td>
+</tr>
+</tbody>
+</table>
 <h3 id="kwok.x-k8s.io/v1alpha1.Stage">
 Stage
 <a href="#kwok.x-k8s.io%2fv1alpha1.Stage"> #</a>
@@ -1295,8 +1623,23 @@ int
 </em>
 </td>
 <td>
-<p>Weight means the current stage, in case of multiple stages,
+<p>Weight means when multiple stages share the same ResourceRef and Selector,
 a random stage will be matched as the next stage based on the weight.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>weightFrom</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ExpressionFromSource">
+ExpressionFromSource
+</a>
+</em>
+</td>
+<td>
+<p>WeightFrom means is the expression used to get the value.
+If it is a number type, convert to int.
+If it is a string type, the value get will be parsed by strconv.ParseInt.</p>
 </td>
 </tr>
 <tr>
@@ -1358,6 +1701,139 @@ StageStatus
 References
 <a href="#references"> #</a>
 </h2>
+<h3 id="action.kwok.x-k8s.io/v1alpha1.GroupVersionResource">
+GroupVersionResource
+<a href="#action.kwok.x-k8s.io%2fv1alpha1.GroupVersionResource"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#action.kwok.x-k8s.io/v1alpha1.ResourcePatch">ResourcePatch</a>
+</p>
+<p>
+<p>GroupVersionResource is a struct that represents the group version resource.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>group</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Group represents the group of the resource.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>version</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Version represents the version of the resource.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>resource</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Resource represents the type of the resource.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="action.kwok.x-k8s.io/v1alpha1.PatchMethod">
+PatchMethod
+(<code>string</code> alias)
+<a href="#action.kwok.x-k8s.io%2fv1alpha1.PatchMethod"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#action.kwok.x-k8s.io/v1alpha1.ResourcePatch">ResourcePatch</a>
+</p>
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&#34;create&#34;</code></td>
+<td><p>PatchMethodCreate means that the resource will be created by create.</p>
+</td>
+</tr>
+<tr>
+<td><code>&#34;delete&#34;</code></td>
+<td><p>PatchMethodDelete means that the resource will be deleted by delete.</p>
+</td>
+</tr>
+<tr>
+<td><code>&#34;patch&#34;</code></td>
+<td><p>PatchMethodPatch means that the resource will be patched by patch.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="action.kwok.x-k8s.io/v1alpha1.Target">
+Target
+<a href="#action.kwok.x-k8s.io%2fv1alpha1.Target"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#action.kwok.x-k8s.io/v1alpha1.ResourcePatch">ResourcePatch</a>
+</p>
+<p>
+<p>Target is a struct that represents the target of the ResourcePatch.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>name</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Name represents the name of the resource to be patched.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>namespace</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Namespace represents the namespace of the resource to be patched.</p>
+</td>
+</tr>
+</tbody>
+</table>
 <h3 id="config.kwok.x-k8s.io/v1alpha1.Component">
 Component
 <a href="#config.kwok.x-k8s.io%2fv1alpha1.Component"> #</a>
@@ -1518,6 +1994,32 @@ string
 </tr>
 <tr>
 <td>
+<code>metric</code>
+<em>
+<a href="#config.kwok.x-k8s.io/v1alpha1.ComponentMetric">
+ComponentMetric
+</a>
+</em>
+</td>
+<td>
+<p>Metric is the metric of the component.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>metricsDiscovery</code>
+<em>
+<a href="#config.kwok.x-k8s.io/v1alpha1.ComponentMetric">
+ComponentMetric
+</a>
+</em>
+</td>
+<td>
+<p>MetricsDiscovery is the metrics discovery of the component.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>version</code>
 <em>
 string
@@ -1526,6 +2028,93 @@ string
 <td>
 <em>(Optional)</em>
 <p>Version is the version of the component.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="config.kwok.x-k8s.io/v1alpha1.ComponentMetric">
+ComponentMetric
+<a href="#config.kwok.x-k8s.io%2fv1alpha1.ComponentMetric"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#config.kwok.x-k8s.io/v1alpha1.Component">Component</a>
+</p>
+<p>
+<p>ComponentMetric represents a metric of a component.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>scheme</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Scheme is the scheme of the metric.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>host</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Host is the host of the metric.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>path</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Path is the path of the metric.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>certPath</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>CertPath is the cert path of the metric.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>keyPath</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>KeyPath is the key path of the metric.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>insecureSkipVerify</code>
+<em>
+bool
+</em>
+</td>
+<td>
+<p>InsecureSkipVerify is the flag to skip verify the metric.</p>
 </td>
 </tr>
 </tbody>
@@ -1686,6 +2275,17 @@ string
 </td>
 <td>
 <p>Value is the value of the extra args.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>override</code>
+<em>
+bool
+</em>
+</td>
+<td>
+<p>Override is the value of is it override the arg</p>
 </td>
 </tr>
 </tbody>
@@ -1927,7 +2527,8 @@ string
 </td>
 <td>
 <p>If a Node/Pod is on a managed Node and has this annotation status will not be modified
-is the default value for flag &ndash;disregard-status-with-annotation-selector</p>
+is the default value for flag &ndash;disregard-status-with-annotation-selector
+Deprecated: use Stage API instead</p>
 </td>
 </tr>
 <tr>
@@ -1939,7 +2540,8 @@ string
 </td>
 <td>
 <p>If a Node/Pod is on a managed Node and has this label status will not be modified
-is the default value for flag &ndash;disregard-status-with-label-selector</p>
+is the default value for flag &ndash;disregard-status-with-label-selector
+Deprecated: use Stage API instead</p>
 </td>
 </tr>
 <tr>
@@ -1963,7 +2565,8 @@ bool
 </td>
 <td>
 <p>Experimental support for getting pod ip from CNI, for CNI-related components, Only works with Linux.
-is the default value for flag &ndash;experimental-enable-cni</p>
+is the default value for flag &ndash;experimental-enable-cni
+Deprecated: It will be removed and will be supported in the form of plugins</p>
 </td>
 </tr>
 <tr>
@@ -2091,6 +2694,30 @@ is the default value for flag &ndash;kube-apiserver-port and env KWOK_KUBE_APISE
 </tr>
 <tr>
 <td>
+<code>kubeApiserverInsecurePort</code>
+<em>
+uint32
+</em>
+</td>
+<td>
+<p>KubeApiserverInsecurePort is the port to expose insecure apiserver.
+is the default value for flag &ndash;kube-apiserver-insecure-port and env KWOK_KUBE_APISERVER_INSECURE_PORT</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>insecureKubeconfig</code>
+<em>
+bool
+</em>
+</td>
+<td>
+<p>InsecureKubeconfig is the flag to use insecure kubeconfig.
+only available when KubeApiserverInsecurePort is set.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>runtime</code>
 <em>
 string
@@ -2198,6 +2825,17 @@ string
 </tr>
 <tr>
 <td>
+<code>dashboardMetricsScraperVersion</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>DashboardMetricsScraperVersion is the version of Kubernetes dashboard metrics scraper to use.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>prometheusVersion</code>
 <em>
 string
@@ -2222,15 +2860,13 @@ is the default value for env KWOK_JAEGER_VERSION</p>
 </tr>
 <tr>
 <td>
-<code>dockerComposeVersion</code>
+<code>metricsServerVersion</code>
 <em>
 string
 </em>
 </td>
 <td>
-<p>DockerComposeVersion is the version of docker-compose to use.
-is the default value for env KWOK_DOCKER_COMPOSE_VERSION
-Deprecated: docker compose will be removed in a future release</p>
+<p>MetricsServerVersion is the version of metrics-server to use.</p>
 </td>
 </tr>
 <tr>
@@ -2284,6 +2920,39 @@ is the default value for flag &ndash;kube-scheduler-config and env KWOK_KUBE_SCH
 </tr>
 <tr>
 <td>
+<code>components</code>
+<em>
+[]string
+</em>
+</td>
+<td>
+<p>Components is the configuration for components.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>disable</code>
+<em>
+[]string
+</em>
+</td>
+<td>
+<p>Disable is the configuration for disables components.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>enable</code>
+<em>
+[]string
+</em>
+</td>
+<td>
+<p>Enable is the configuration for enables components.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>disableKubeScheduler</code>
 <em>
 bool
@@ -2291,7 +2960,8 @@ bool
 </td>
 <td>
 <p>DisableKubeScheduler is the flag to disable kube-scheduler.
-is the default value for flag &ndash;disable-kube-scheduler and env KWOK_DISABLE_KUBE_SCHEDULER</p>
+is the default value for flag &ndash;disable-kube-scheduler and env KWOK_DISABLE_KUBE_SCHEDULER
+Deprecated: Use Disable instead</p>
 </td>
 </tr>
 <tr>
@@ -2303,7 +2973,20 @@ bool
 </td>
 <td>
 <p>DisableKubeControllerManager is the flag to disable kube-controller-manager.
-is the default value for flag &ndash;disable-kube-controller-manager and env KWOK_DISABLE_KUBE_CONTROLLER_MANAGER</p>
+is the default value for flag &ndash;disable-kube-controller-manager and env KWOK_DISABLE_KUBE_CONTROLLER_MANAGER
+Deprecated: Use Disable instead</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>enableMetricsServer</code>
+<em>
+bool
+</em>
+</td>
+<td>
+<p>EnableMetricsServer is the flag to enable metrics-server.
+Deprecated: Use Enable instead</p>
 </td>
 </tr>
 <tr>
@@ -2379,6 +3062,17 @@ is the default value for env KWOK_JAEGER_IMAGE_PREFIX</p>
 </tr>
 <tr>
 <td>
+<code>metricsServerImagePrefix</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>MetricsServerImagePrefix is the prefix of the metrics-server image.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>etcdImage</code>
 <em>
 string
@@ -2427,6 +3121,18 @@ is the default value for flag &ndash;kube-scheduler-image and env KWOK_KUBE_SCHE
 </tr>
 <tr>
 <td>
+<code>kubectlImage</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>KubectlImage is the image of kubectl.
+is the default value for flag &ndash;kubectl-image and env KWOK_KUBECTL_IMAGE</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>kwokControllerImage</code>
 <em>
 string
@@ -2446,6 +3152,17 @@ string
 </td>
 <td>
 <p>DashboardImage is the image of dashboard.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>dashboardMetricsScraperImage</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>DashboardMetricsScraperImage is the image of dashboard metrics scraper.</p>
 </td>
 </tr>
 <tr>
@@ -2470,6 +3187,17 @@ string
 <td>
 <p>JaegerImage is the image of Jaeger.
 is the default value for flag &ndash;jaeger-image and env KWOK_JAEGER_IMAGE</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>metricsServerImage</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>MetricsServerImage is the image of metrics-server.</p>
 </td>
 </tr>
 <tr>
@@ -2582,6 +3310,17 @@ is the default value for env KWOK_ETCD_BINARY_PREFIX</p>
 </tr>
 <tr>
 <td>
+<code>etcdctlBinary</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>EtcdctlBinary is the binary of etcdctl.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>etcdBinary</code>
 <em>
 string
@@ -2601,7 +3340,19 @@ string
 </td>
 <td>
 <p>EtcdBinaryTar is the tar of the binary of etcd.
-is the default value for env KWOK_ETCD_BINARY_TAR</p>
+is the default value for env KWOK_ETCD_BINARY_TAR
+Deprecated: Use EtcdBinary or EtcdctlBinary instead</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>etcdPrefix</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>EtcdPrefix is the prefix of etcd.</p>
 </td>
 </tr>
 <tr>
@@ -2661,7 +3412,8 @@ string
 </td>
 <td>
 <p>PrometheusBinaryTar is the tar of binary of Prometheus.
-is the default value for env KWOK_PROMETHEUS_BINARY_TAR</p>
+is the default value for env KWOK_PROMETHEUS_BINARY_TAR
+Deprecated: Use PrometheusBinary instead</p>
 </td>
 </tr>
 <tr>
@@ -2697,33 +3449,30 @@ string
 </td>
 <td>
 <p>JaegerBinaryTar is the tar of binary of Jaeger.
-is the default value for env KWOK_JAEGER_TAR</p>
+is the default value for env KWOK_JAEGER_TAR
+Deprecated: Use JaegerBinary instead</p>
 </td>
 </tr>
 <tr>
 <td>
-<code>dockerComposeBinaryPrefix</code>
+<code>metricsServerBinaryPrefix</code>
 <em>
 string
 </em>
 </td>
 <td>
-<p>DockerComposeBinaryPrefix is the binary of docker-compose.
-is the default value for env KWOK_DOCKER_COMPOSE_BINARY_PREFIX
-Deprecated: docker compose will be removed in a future release</p>
+<p>MetricsServerBinaryPrefix is the prefix of the metrics-server binary.</p>
 </td>
 </tr>
 <tr>
 <td>
-<code>dockerComposeBinary</code>
+<code>metricsServerBinary</code>
 <em>
 string
 </em>
 </td>
 <td>
-<p>DockerComposeBinary is the binary of Docker compose.
-is the default value for flag &ndash;docker-compose-binary and env KWOK_DOCKER_COMPOSE_BINARY
-Deprecated: docker compose will be removed in a future release</p>
+<p>MetricsServerBinary is the binary of metrics-server.</p>
 </td>
 </tr>
 <tr>
@@ -2759,7 +3508,10 @@ string
 </td>
 <td>
 <p>Mode is several default parameter templates for clusters
-is the default value for env KWOK_MODE</p>
+is the default value for env KWOK_MODE
+k8s 1.29, different components use different FeatureGate,
+which makes it impossible to create clusters properly using this feature.
+Deprecated: This mode will be removed in a future release</p>
 </td>
 </tr>
 <tr>
@@ -2891,6 +3643,17 @@ is the default value for flag &ndash;controller-port and env KWOK_CONTROLLER_POR
 </tr>
 <tr>
 <td>
+<code>metricsServerPort</code>
+<em>
+uint32
+</em>
+</td>
+<td>
+<p>MetricsServerPort is metrics-server port that is exposed to the host.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>cacheDir</code>
 <em>
 string
@@ -2946,6 +3709,17 @@ uint
 </tr>
 <tr>
 <td>
+<code>heartbeatFactor</code>
+<em>
+float64
+</em>
+</td>
+<td>
+<p>HeartbeatFactor is the scale factor for all about heartbeat.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>bindAddress</code>
 <em>
 string
@@ -2975,6 +3749,17 @@ bool
 </td>
 <td>
 <p>DisableQPSLimits specifies whether to disable QPS limits for components.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>etcdQuotaBackendSize</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>EtcdQuotaBackendSize is the backend quota for etcd.</p>
 </td>
 </tr>
 </tbody>
@@ -3116,6 +3901,55 @@ Protocol
 <tr>
 <td><code>&#34;UDP&#34;</code></td>
 <td><p>ProtocolUDP is the UDP protocol.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="config.kwok.x-k8s.io/v1alpha1.TracingConfiguration">
+TracingConfiguration
+<a href="#config.kwok.x-k8s.io%2fv1alpha1.TracingConfiguration"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#config.kwok.x-k8s.io/v1alpha1.KwokConfiguration">KwokConfiguration</a>
+</p>
+<p>
+<p>TracingConfiguration provides versioned configuration for OpenTelemetry tracing clients.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>endpoint</code>
+<em>
+string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Endpoint of the collector this component will report traces to.
+The connection is insecure, and does not currently support TLS.
+Recommended is unset, and endpoint is the otlp grpc default, localhost:4317.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>samplingRatePerMillion</code>
+<em>
+int32
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>SamplingRatePerMillion is the number of samples to collect per million spans.
+Recommended is unset. If unset, sampler respects its parent span&rsquo;s sampling
+rate, but otherwise never samples.</p>
 </td>
 </tr>
 </tbody>
@@ -3639,6 +4473,87 @@ ClusterPortForwardStatus
 </tr>
 </tbody>
 </table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ClusterResourceUsageSpec">
+ClusterResourceUsageSpec
+<a href="#kwok.x-k8s.io%2fv1alpha1.ClusterResourceUsageSpec"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsage">ClusterResourceUsage</a>
+</p>
+<p>
+<p>ClusterResourceUsageSpec holds spec for cluster resource usage.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>selector</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ObjectSelector">
+ObjectSelector
+</a>
+</em>
+</td>
+<td>
+<p>Selector is a selector to filter pods to configure.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>usages</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageContainer">
+[]ResourceUsageContainer
+</a>
+</em>
+</td>
+<td>
+<p>Usages is a list of resource usage for the pod.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ClusterResourceUsageStatus">
+ClusterResourceUsageStatus
+<a href="#kwok.x-k8s.io%2fv1alpha1.ClusterResourceUsageStatus"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsage">ClusterResourceUsage</a>
+</p>
+<p>
+<p>ClusterResourceUsageStatus holds status for cluster resource usage</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>conditions</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.Condition">
+[]Condition
+</a>
+</em>
+</td>
+<td>
+<p>Conditions holds conditions for cluster resource usage</p>
+</td>
+</tr>
+</tbody>
+</table>
 <h3 id="kwok.x-k8s.io/v1alpha1.Condition">
 Condition
 <a href="#kwok.x-k8s.io%2fv1alpha1.Condition"> #</a>
@@ -3655,6 +4570,8 @@ Condition
 , 
 <a href="#kwok.x-k8s.io/v1alpha1.ClusterPortForwardStatus">ClusterPortForwardStatus</a>
 , 
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsageStatus">ClusterResourceUsageStatus</a>
+, 
 <a href="#kwok.x-k8s.io/v1alpha1.ExecStatus">ExecStatus</a>
 , 
 <a href="#kwok.x-k8s.io/v1alpha1.LogsStatus">LogsStatus</a>
@@ -3662,6 +4579,8 @@ Condition
 <a href="#kwok.x-k8s.io/v1alpha1.MetricStatus">MetricStatus</a>
 , 
 <a href="#kwok.x-k8s.io/v1alpha1.PortForwardStatus">PortForwardStatus</a>
+, 
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageStatus">ResourceUsageStatus</a>
 , 
 <a href="#kwok.x-k8s.io/v1alpha1.StageStatus">StageStatus</a>
 </p>
@@ -4044,6 +4963,8 @@ ExpressionFromSource
 <p>
 <em>Appears on: </em>
 <a href="#kwok.x-k8s.io/v1alpha1.StageDelay">StageDelay</a>
+, 
+<a href="#kwok.x-k8s.io/v1alpha1.StageSpec">StageSpec</a>
 </p>
 <p>
 <p>ExpressionFromSource represents a source for the value of a from.</p>
@@ -4200,6 +5121,40 @@ string
 </td>
 <td>
 <p>Address is the address to forward to.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ImpersonationConfig">
+ImpersonationConfig
+<a href="#kwok.x-k8s.io%2fv1alpha1.ImpersonationConfig"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.StageNext">StageNext</a>
+, 
+<a href="#kwok.x-k8s.io/v1alpha1.StagePatch">StagePatch</a>
+</p>
+<p>
+<p>ImpersonationConfig describes the configuration for impersonating clients</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>username</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Username the target username for the client to impersonate</p>
 </td>
 </tr>
 </tbody>
@@ -4661,6 +5616,8 @@ ObjectSelector
 <a href="#kwok.x-k8s.io/v1alpha1.ClusterLogsSpec">ClusterLogsSpec</a>
 , 
 <a href="#kwok.x-k8s.io/v1alpha1.ClusterPortForwardSpec">ClusterPortForwardSpec</a>
+, 
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsageSpec">ClusterResourceUsageSpec</a>
 </p>
 <p>
 <p>ObjectSelector holds information how to match based on namespace and name.</p>
@@ -4763,6 +5720,164 @@ PortForwardStatus
 </td>
 <td>
 <p>Conditions holds conditions for port forward</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ResourceUsageContainer">
+ResourceUsageContainer
+<a href="#kwok.x-k8s.io%2fv1alpha1.ResourceUsageContainer"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.ClusterResourceUsageSpec">ClusterResourceUsageSpec</a>
+, 
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageSpec">ResourceUsageSpec</a>
+</p>
+<p>
+<p>ResourceUsageContainer holds spec for resource usage container.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>containers</code>
+<em>
+[]string
+</em>
+</td>
+<td>
+<p>Containers is list of container names.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>usage</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageValue">
+map[string]sigs.k8s.io/kwok/pkg/apis/v1alpha1.ResourceUsageValue
+</a>
+</em>
+</td>
+<td>
+<p>Usage is a list of resource usage for the container.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ResourceUsageSpec">
+ResourceUsageSpec
+<a href="#kwok.x-k8s.io%2fv1alpha1.ResourceUsageSpec"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsage">ResourceUsage</a>
+</p>
+<p>
+<p>ResourceUsageSpec holds spec for resource usage.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>usages</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageContainer">
+[]ResourceUsageContainer
+</a>
+</em>
+</td>
+<td>
+<p>Usages is a list of resource usage for the pod.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ResourceUsageStatus">
+ResourceUsageStatus
+<a href="#kwok.x-k8s.io%2fv1alpha1.ResourceUsageStatus"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsage">ResourceUsage</a>
+</p>
+<p>
+<p>ResourceUsageStatus holds status for resource usage</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>conditions</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.Condition">
+[]Condition
+</a>
+</em>
+</td>
+<td>
+<p>Conditions holds conditions for resource usage</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.ResourceUsageValue">
+ResourceUsageValue
+<a href="#kwok.x-k8s.io%2fv1alpha1.ResourceUsageValue"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.ResourceUsageContainer">ResourceUsageContainer</a>
+</p>
+<p>
+<p>ResourceUsageValue holds value for resource usage.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>value</code>
+<em>
+k8s.io/apimachinery/pkg/api/resource.Quantity
+</em>
+</td>
+<td>
+<p>Value is the value for resource usage.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>expression</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Expression is the expression for resource usage.</p>
 </td>
 </tr>
 </tbody>
@@ -5156,13 +6271,177 @@ bool
 </tr>
 <tr>
 <td>
+<code>patches</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.StagePatch">
+[]StagePatch
+</a>
+</em>
+</td>
+<td>
+<p>Patches means that the resource will be patched.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>statusTemplate</code>
 <em>
 string
 </em>
 </td>
 <td>
-<p>StatusTemplate indicates the template for modifying the status of the resource in the next.</p>
+<p>StatusTemplate indicates the template for modifying the status of the resource in the next.
+Deprecated: Use Patches instead.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>statusSubresource</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>StatusSubresource indicates the name of the subresource that will be patched. The support for
+this field is not available in Pod and Node resources.
+Deprecated: Use Patches instead.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>statusPatchAs</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ImpersonationConfig">
+ImpersonationConfig
+</a>
+</em>
+</td>
+<td>
+<p>StatusPatchAs indicates the impersonating configuration for client when patching status.
+In most cases this will be empty, in which case the default client service account will be used.
+When this is not empty, a corresponding rbac change is required to grant <code>impersonate</code> privilege.
+The support for this field is not available in Pod and Node resources.
+Deprecated: Use Patches instead.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.StagePatch">
+StagePatch
+<a href="#kwok.x-k8s.io%2fv1alpha1.StagePatch"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.StageNext">StageNext</a>
+</p>
+<p>
+<p>StagePatch describes the patch for the resource.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>subresource</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Subresource indicates the name of the subresource that will be patched.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>root</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Root indicates the root of the template calculated by the patch.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>template</code>
+<em>
+string
+</em>
+</td>
+<td>
+<p>Template indicates the template for modifying the resource in the next.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>type</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.StagePatchType">
+StagePatchType
+</a>
+</em>
+</td>
+<td>
+<p>Type indicates the type of the patch.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>impersonation</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ImpersonationConfig">
+ImpersonationConfig
+</a>
+</em>
+</td>
+<td>
+<p>Impersonation indicates the impersonating configuration for client when patching status.
+In most cases this will be empty, in which case the default client service account will be used.
+When this is not empty, a corresponding rbac change is required to grant <code>impersonate</code> privilege.
+The support for this field is not available in Pod and Node resources.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kwok.x-k8s.io/v1alpha1.StagePatchType">
+StagePatchType
+(<code>string</code> alias)
+<a href="#kwok.x-k8s.io%2fv1alpha1.StagePatchType"> #</a>
+</h3>
+<p>
+<em>Appears on: </em>
+<a href="#kwok.x-k8s.io/v1alpha1.StagePatch">StagePatch</a>
+</p>
+<p>
+<p>StagePatchType is the type of the patch.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&#34;json&#34;</code></td>
+<td><p>StagePatchTypeJSONPatch is the JSON patch type.</p>
+</td>
+</tr>
+<tr>
+<td><code>&#34;merge&#34;</code></td>
+<td><p>StagePatchTypeMergePatch is the merge patch type.</p>
+</td>
+</tr>
+<tr>
+<td><code>&#34;strategic&#34;</code></td>
+<td><p>StagePatchTypeStrategicMergePatch is the strategic merge patch type.</p>
 </td>
 </tr>
 </tbody>
@@ -5325,8 +6604,23 @@ int
 </em>
 </td>
 <td>
-<p>Weight means the current stage, in case of multiple stages,
+<p>Weight means when multiple stages share the same ResourceRef and Selector,
 a random stage will be matched as the next stage based on the weight.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>weightFrom</code>
+<em>
+<a href="#kwok.x-k8s.io/v1alpha1.ExpressionFromSource">
+ExpressionFromSource
+</a>
+</em>
+</td>
+<td>
+<p>WeightFrom means is the expression used to get the value.
+If it is a number type, convert to int.
+If it is a string type, the value get will be parsed by strconv.ParseInt.</p>
 </td>
 </tr>
 <tr>

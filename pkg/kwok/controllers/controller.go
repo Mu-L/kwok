@@ -18,21 +18,23 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	clientcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 
@@ -40,76 +42,69 @@ import (
 	"sigs.k8s.io/kwok/pkg/apis/v1alpha1"
 	"sigs.k8s.io/kwok/pkg/client/clientset/versioned"
 	"sigs.k8s.io/kwok/pkg/config/resources"
-	"sigs.k8s.io/kwok/pkg/consts"
 	"sigs.k8s.io/kwok/pkg/log"
+	"sigs.k8s.io/kwok/pkg/utils/client"
 	"sigs.k8s.io/kwok/pkg/utils/gotpl"
 	"sigs.k8s.io/kwok/pkg/utils/informer"
+	"sigs.k8s.io/kwok/pkg/utils/lifecycle"
+	"sigs.k8s.io/kwok/pkg/utils/patch"
 	"sigs.k8s.io/kwok/pkg/utils/queue"
 	"sigs.k8s.io/kwok/pkg/utils/slices"
-	"sigs.k8s.io/kwok/pkg/utils/yaml"
 )
 
 var (
-	startTime = time.Now().Format(time.RFC3339Nano)
-
-	defaultFuncMap = gotpl.FuncMap{
-		"Quote": func(s any) string {
-			data, err := json.Marshal(s)
-			if err != nil {
-				return strconv.Quote(fmt.Sprint(s))
-			}
-			if len(data) == 0 {
-				return `""`
-			}
-			if data[0] == '"' {
-				return string(data)
-			}
-			return strconv.Quote(string(data))
-		},
-		"Now": func() string {
-			return time.Now().Format(time.RFC3339Nano)
-		},
-		"StartTime": func() string {
-			return startTime
-		},
-		"YAML": func(s interface{}, indent ...int) (string, error) {
-			d, err := yaml.Marshal(s)
-			if err != nil {
-				return "", err
-			}
-
-			data := string(d)
-			if len(indent) == 1 && indent[0] > 0 {
-				pad := strings.Repeat(" ", indent[0]*2)
-				data = strings.ReplaceAll("\n"+data, "\n", "\n"+pad)
-			}
-			return data, nil
-		},
-		"Version": func() string {
-			return consts.Version
-		},
-	}
-
 	nodeKind = corev1.SchemeGroupVersion.WithKind("Node")
 )
 
 // Controller is a fake kubelet implementation that can be used to test
 type Controller struct {
-	conf        Config
+	conf Config
+
+	stagesManager *StagesManager
+
 	nodes       *NodeController
 	pods        *PodController
 	nodeLeases  *NodeLeaseController
 	broadcaster record.EventBroadcaster
-	typedClient kubernetes.Interface
+	recorder    record.EventRecorder
 
-	nodeCacheGetter informer.Getter[*corev1.Node]
-	podCacheGetter  informer.Getter[*corev1.Pod]
+	nodeCacheGetter      informer.Getter[*corev1.Node]
+	podCacheGetter       informer.Getter[*corev1.Pod]
+	nodeLeaseCacheGetter informer.Getter[*coordinationv1.Lease]
+
+	onNodeManagedFunc   func(nodeName string)
+	onNodeUnmanagedFunc func(nodeName string)
+	readOnlyFunc        func(nodeName string) bool
+
+	manageNodesWithLabelSelector      string
+	manageNodesWithAnnotationSelector string
+	manageNodesWithFieldSelector      string
+	manageNodeLeasesWithFieldSelector string
+	managePodsWithFieldSelector       string
+
+	nodesChan chan informer.Event[*corev1.Node]
+	podsChan  chan informer.Event[*corev1.Pod]
+
+	nodeLeasesInformer *informer.Informer[*coordinationv1.Lease, *coordinationv1.LeaseList]
+	nodesInformer      *informer.Informer[*corev1.Node, *corev1.NodeList]
+	podsInformer       *informer.Informer[*corev1.Pod, *corev1.PodList]
+
+	patchMeta *patch.PatchMetaFromOpenAPI3
+
+	stageGetter resources.DynamicGetter[[]*internalversion.Stage]
+
+	podOnNodeManageQueue queue.Queue[string]
+	nodeManageQueue      queue.Queue[string]
 }
 
 // Config is the configuration for the controller
 type Config struct {
 	Clock                                 clock.Clock
 	EnableCNI                             bool
+	DynamicClient                         dynamic.Interface
+	RESTClient                            rest.Interface
+	ImpersonatingDynamicClient            client.DynamicClientImpersonator
+	RESTMapper                            meta.RESTMapper
 	TypedClient                           kubernetes.Interface
 	TypedKwokClient                       versioned.Interface
 	ManageSingleNode                      string
@@ -122,8 +117,7 @@ type Config struct {
 	NodeIP                                string
 	NodeName                              string
 	NodePort                              int
-	PodStages                             []*internalversion.Stage
-	NodeStages                            []*internalversion.Stage
+	LocalStages                           map[internalversion.StageResourceRef][]*internalversion.Stage
 	PodPlayStageParallelism               uint
 	NodePlayStageParallelism              uint
 	NodeLeaseDurationSeconds              uint
@@ -131,6 +125,7 @@ type Config struct {
 	ID                                    string
 	EnableMetrics                         bool
 	EnablePodCache                        bool
+	FuncMap                               gotpl.FuncMap
 }
 
 func (c Config) validate() error {
@@ -160,336 +155,436 @@ func NewController(conf Config) (*Controller, error) {
 		return nil, err
 	}
 
-	n := &Controller{
-		conf:        conf,
-		broadcaster: record.NewBroadcaster(),
-		typedClient: conf.TypedClient,
+	c := &Controller{
+		conf: conf,
 	}
 
-	return n, nil
+	return c, nil
 }
 
-// Start starts the controller
-func (c *Controller) Start(ctx context.Context) error {
-	if c.pods != nil || c.nodes != nil || c.nodeLeases != nil {
+func (c *Controller) init(ctx context.Context) (err error) {
+	if c.stagesManager != nil {
 		return fmt.Errorf("controller already started")
 	}
 
-	conf := c.conf
-
-	recorder := c.broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kwok_controller"})
-
-	var (
-		err                   error
-		nodeLeases            *NodeLeaseController
-		nodeLeasesChan        chan informer.Event[*coordinationv1.Lease]
-		onLeaseNodeManageFunc func(nodeName string)
-		onNodeManagedFunc     func(nodeName string)
-		readOnlyFunc          func(nodeName string) bool
-
-		manageNodesWithLabelSelector      string
-		manageNodesWithAnnotationSelector string
-		manageNodesWithFieldSelector      string
-		manageNodeLeasesWithFieldSelector string
-		managePodsWithFieldSelector       string
-	)
-
 	switch {
-	case conf.ManageSingleNode != "":
-		managePodsWithFieldSelector = fields.OneTermEqualSelector("spec.nodeName", conf.ManageSingleNode).String()
-		manageNodesWithFieldSelector = fields.OneTermEqualSelector("metadata.name", conf.ManageSingleNode).String()
-		manageNodeLeasesWithFieldSelector = fields.OneTermEqualSelector("metadata.name", conf.ManageSingleNode).String()
-	case conf.ManageAllNodes:
-		managePodsWithFieldSelector = fields.OneTermNotEqualSelector("spec.nodeName", "").String()
-	case conf.ManageNodesWithLabelSelector != "" || conf.ManageNodesWithAnnotationSelector != "":
-		manageNodesWithLabelSelector = conf.ManageNodesWithLabelSelector
-		manageNodesWithAnnotationSelector = conf.ManageNodesWithAnnotationSelector
-		managePodsWithFieldSelector = fields.OneTermNotEqualSelector("spec.nodeName", "").String()
+	case c.conf.ManageSingleNode != "":
+		c.managePodsWithFieldSelector = fields.OneTermEqualSelector("spec.nodeName", c.conf.ManageSingleNode).String()
+		c.manageNodesWithFieldSelector = fields.OneTermEqualSelector("metadata.name", c.conf.ManageSingleNode).String()
+		c.manageNodeLeasesWithFieldSelector = fields.OneTermEqualSelector("metadata.name", c.conf.ManageSingleNode).String()
+	case c.conf.ManageAllNodes:
+		c.managePodsWithFieldSelector = fields.OneTermNotEqualSelector("spec.nodeName", "").String()
+	case c.conf.ManageNodesWithLabelSelector != "" || c.conf.ManageNodesWithAnnotationSelector != "":
+		c.manageNodesWithLabelSelector = c.conf.ManageNodesWithLabelSelector
+		c.manageNodesWithAnnotationSelector = c.conf.ManageNodesWithAnnotationSelector
+		c.managePodsWithFieldSelector = fields.OneTermNotEqualSelector("spec.nodeName", "").String()
 	}
 
-	nodeChan := make(chan informer.Event[*corev1.Node], 1)
-	nodesCli := conf.TypedClient.CoreV1().Nodes()
-	nodesInformer := informer.NewInformer[*corev1.Node, *corev1.NodeList](nodesCli)
-	nodesCache, err := nodesInformer.WatchWithCache(ctx, informer.Option{
-		LabelSelector:      manageNodesWithLabelSelector,
-		AnnotationSelector: manageNodesWithAnnotationSelector,
-		FieldSelector:      manageNodesWithFieldSelector,
-	}, nodeChan)
+	c.broadcaster = record.NewBroadcaster()
+	c.recorder = c.broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kwok_controller"})
+	c.broadcaster.StartRecordingToSink(&clientcorev1.EventSinkImpl{Interface: c.conf.TypedClient.CoreV1().Events("")})
+
+	c.nodesChan = make(chan informer.Event[*corev1.Node], 1)
+	c.podsChan = make(chan informer.Event[*corev1.Pod], 1)
+
+	nodesCli := c.conf.TypedClient.CoreV1().Nodes()
+	c.nodesInformer = informer.NewInformer[*corev1.Node, *corev1.NodeList](nodesCli)
+	c.nodeCacheGetter, err = c.nodesInformer.WatchWithCache(ctx, informer.Option{
+		LabelSelector:      c.manageNodesWithLabelSelector,
+		AnnotationSelector: c.manageNodesWithAnnotationSelector,
+		FieldSelector:      c.manageNodesWithFieldSelector,
+	}, c.nodesChan)
 	if err != nil {
 		return fmt.Errorf("failed to watch nodes: %w", err)
 	}
 
-	podsChan := make(chan informer.Event[*corev1.Pod], 1)
-	podsCli := conf.TypedClient.CoreV1().Pods(corev1.NamespaceAll)
-	podsInformer := informer.NewInformer[*corev1.Pod, *corev1.PodList](podsCli)
+	podsCli := c.conf.TypedClient.CoreV1().Pods(corev1.NamespaceAll)
+	c.podsInformer = informer.NewInformer[*corev1.Pod, *corev1.PodList](podsCli)
 
 	podWatchOption := informer.Option{
-		FieldSelector: managePodsWithFieldSelector,
+		FieldSelector: c.managePodsWithFieldSelector,
 	}
-
-	var podsCache informer.Getter[*corev1.Pod]
-	if conf.EnablePodCache {
-		podsCache, err = podsInformer.WatchWithCache(ctx, podWatchOption, podsChan)
+	if c.conf.EnablePodCache {
+		c.podCacheGetter, err = c.podsInformer.WatchWithLazyCache(ctx, podWatchOption, c.podsChan)
 	} else {
-		err = podsInformer.Watch(ctx, podWatchOption, podsChan)
+		err = c.podsInformer.Watch(ctx, podWatchOption, c.podsChan)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to watch pods: %w", err)
 	}
 
-	if conf.NodeLeaseDurationSeconds != 0 {
-		nodeLeasesChan = make(chan informer.Event[*coordinationv1.Lease], 1)
-		nodeLeasesCli := conf.TypedClient.CoordinationV1().Leases(corev1.NamespaceNodeLease)
-		nodeLeasesInformer := informer.NewInformer[*coordinationv1.Lease, *coordinationv1.LeaseList](nodeLeasesCli)
-		err = nodeLeasesInformer.Watch(ctx, informer.Option{
-			FieldSelector: manageNodeLeasesWithFieldSelector,
-		}, nodeLeasesChan)
-		if err != nil {
-			return fmt.Errorf("failed to watch nodes: %w", err)
-		}
-
-		leaseDuration := time.Duration(conf.NodeLeaseDurationSeconds) * time.Second
-		// https://github.com/kubernetes/kubernetes/blob/02f4d643eae2e225591702e1bbf432efea453a26/pkg/kubelet/kubelet.go#L199-L200
-		renewInterval := leaseDuration / 4
-		// https://github.com/kubernetes/component-helpers/blob/d17b6f1e84500ee7062a26f5327dc73cb3e9374a/apimachinery/lease/controller.go#L100
-		renewIntervalJitter := 0.04
-		nodeLeases, err = NewNodeLeaseController(NodeLeaseControllerConfig{
-			Clock:                conf.Clock,
-			TypedClient:          conf.TypedClient,
-			NodeCacheGetter:      nodesCache,
-			LeaseDurationSeconds: conf.NodeLeaseDurationSeconds,
-			LeaseParallelism:     conf.NodeLeaseParallelism,
-			RenewInterval:        renewInterval,
-			RenewIntervalJitter:  renewIntervalJitter,
-			MutateLeaseFunc: setNodeOwnerFunc(func(nodeName string) []metav1.OwnerReference {
-				node, ok := nodesCache.Get(nodeName)
-				if !ok {
-					return nil
-				}
-				ownerReferences := []metav1.OwnerReference{
-					{
-						APIVersion: nodeKind.Version,
-						Kind:       nodeKind.Kind,
-						Name:       node.Name,
-						UID:        node.UID,
-					},
-				}
-				return ownerReferences
-			}),
-			HolderIdentity: conf.ID,
-			OnNodeManagedFunc: func(nodeName string) {
-				onLeaseNodeManageFunc(nodeName)
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create node leases controller: %w", err)
-		}
-
-		// Not holding the lease means the node is not managed
-		readOnlyFunc = func(nodeName string) bool {
-			return !nodeLeases.Held(nodeName)
-		}
+	if c.conf.NodeLeaseDurationSeconds != 0 {
+		nodeLeasesCli := c.conf.TypedClient.CoordinationV1().Leases(corev1.NamespaceNodeLease)
+		c.nodeLeasesInformer = informer.NewInformer[*coordinationv1.Lease, *coordinationv1.LeaseList](nodeLeasesCli)
 	}
 
+	c.patchMeta = patch.NewPatchMetaFromOpenAPI3(c.conf.RESTClient)
+
+	c.podOnNodeManageQueue = queue.NewQueue[string]()
+	c.nodeManageQueue = queue.NewQueue[string]()
+	return nil
+}
+
+func (c *Controller) initNodeLeaseController(ctx context.Context) error {
+	if c.conf.NodeLeaseDurationSeconds == 0 {
+		// Manage pods ignores leases
+		c.onNodeManagedFunc = func(nodeName string) {
+			c.podOnNodeManageQueue.Add(nodeName)
+		}
+		return nil
+	}
+
+	var err error
+	c.nodeLeaseCacheGetter, err = c.nodeLeasesInformer.WatchWithCache(ctx, informer.Option{
+		FieldSelector: c.manageNodeLeasesWithFieldSelector,
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("failed to watch node leases: %w", err)
+	}
+
+	leaseDuration := time.Duration(c.conf.NodeLeaseDurationSeconds) * time.Second
+	// https://github.com/kubernetes/kubernetes/blob/02f4d643eae2e225591702e1bbf432efea453a26/pkg/kubelet/kubelet.go#L199-L200
+	renewInterval := leaseDuration / 4
+	// https://github.com/kubernetes/component-helpers/blob/d17b6f1e84500ee7062a26f5327dc73cb3e9374a/apimachinery/lease/controller.go#L100
+	renewIntervalJitter := 0.04
+	c.nodeLeases, err = NewNodeLeaseController(NodeLeaseControllerConfig{
+		Clock:                c.conf.Clock,
+		TypedClient:          c.conf.TypedClient,
+		LeaseDurationSeconds: c.conf.NodeLeaseDurationSeconds,
+		LeaseParallelism:     c.conf.NodeLeaseParallelism,
+		GetLease: func(nodeName string) (*coordinationv1.Lease, bool) {
+			return c.nodeLeaseCacheGetter.GetWithNamespace(nodeName, corev1.NamespaceNodeLease)
+		},
+		RenewInterval:       renewInterval,
+		RenewIntervalJitter: renewIntervalJitter,
+		MutateLeaseFunc: setNodeOwnerFunc(func(nodeName string) []metav1.OwnerReference {
+			node, ok := c.nodeCacheGetter.Get(nodeName)
+			if !ok {
+				return nil
+			}
+			ownerReferences := []metav1.OwnerReference{
+				{
+					APIVersion: nodeKind.Version,
+					Kind:       nodeKind.Kind,
+					Name:       node.Name,
+					UID:        node.UID,
+				},
+			}
+			return ownerReferences
+		}),
+		HolderIdentity: c.conf.ID,
+		OnNodeManagedFunc: func(nodeName string) {
+			c.nodeManageQueue.Add(nodeName)
+			c.podOnNodeManageQueue.Add(nodeName)
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create node leases controller: %w", err)
+	}
+
+	// Not holding the lease means the node is not managed
+	c.readOnlyFunc = func(nodeName string) bool {
+		return !c.nodeLeases.Held(nodeName)
+	}
+
+	c.onNodeManagedFunc = func(nodeName string) {
+		// Try to hold the lease
+		c.nodeLeases.TryHold(nodeName)
+	}
+	c.onNodeUnmanagedFunc = func(nodeName string) {
+		c.nodeLeases.ReleaseHold(nodeName)
+	}
+
+	go c.nodeLeaseSyncWorker(ctx)
+
+	err = c.nodeLeases.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start node leases controller: %w", err)
+	}
+	return nil
+}
+
+func (c *Controller) nodeLeaseSyncWorker(ctx context.Context) {
+	logger := log.FromContext(ctx)
+	for ctx.Err() == nil {
+		nodeName, ok := c.nodeManageQueue.GetOrWaitWithDone(ctx.Done())
+		if !ok {
+			return
+		}
+		node, ok := c.nodeCacheGetter.Get(nodeName)
+		if !ok {
+			logger.Warn("node not found in cache", "node", nodeName)
+			err := c.nodesInformer.Sync(ctx, informer.Option{
+				FieldSelector: fields.OneTermEqualSelector("metadata.name", nodeName).String(),
+			}, c.nodesChan)
+			if err != nil {
+				logger.Error("failed to update node", err, "node", nodeName)
+			}
+			continue
+		}
+
+		// Avoid slow cache synchronization, which may be judged as unmanaged.
+		c.nodes.ManageNode(node)
+	}
+}
+
+var podRef = internalversion.StageResourceRef{APIGroup: "v1", Kind: "Pod"}
+var nodeRef = internalversion.StageResourceRef{APIGroup: "v1", Kind: "Node"}
+
+func (c *Controller) startStageController(ctx context.Context, ref internalversion.StageResourceRef, lifecycle resources.Getter[lifecycle.Lifecycle]) error {
+	switch ref {
+	case podRef:
+		err := c.initPodController(ctx, lifecycle)
+		if err != nil {
+			return fmt.Errorf("failed to init pod controller: %w", err)
+		}
+
+		go c.podsOnNodeSyncWorker(ctx)
+
+	case nodeRef:
+		err := c.initNodeLeaseController(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to init node lease controller: %w", err)
+		}
+
+		err = c.initNodeController(ctx, lifecycle)
+		if err != nil {
+			return fmt.Errorf("failed to init node controller: %w", err)
+		}
+	default:
+		err := c.initStageController(ctx, ref, lifecycle)
+		if err != nil {
+			return fmt.Errorf("failed to init stage controller: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) initStagesManager(ctx context.Context) error {
 	logger := log.FromContext(ctx)
 
-	var nodeLifecycleGetter resources.Getter[Lifecycle]
-	var podLifecycleGetter resources.Getter[Lifecycle]
-
-	if len(conf.PodStages) == 0 && len(conf.NodeStages) == 0 {
-		getter := resources.NewDynamicGetter[
-			[]*internalversion.Stage,
-			*v1alpha1.Stage,
-			*v1alpha1.StageList,
-		](
-			conf.TypedKwokClient.KwokV1alpha1().Stages(),
-			func(objs []*v1alpha1.Stage) []*internalversion.Stage {
-				return slices.FilterAndMap(objs, func(obj *v1alpha1.Stage) (*internalversion.Stage, bool) {
-					r, err := internalversion.ConvertToInternalStage(obj)
-					if err != nil {
-						logger.Error("failed to convert to internal stage", err, "obj", obj)
-						return nil, false
-					}
-					return r, true
-				})
-			},
-		)
-
-		nodeLifecycleGetter = resources.NewFilter[Lifecycle, []*internalversion.Stage](getter, func(stages []*internalversion.Stage) Lifecycle {
-			lifecycle := slices.FilterAndMap(stages, func(stage *internalversion.Stage) (*LifecycleStage, bool) {
-				if stage.Spec.ResourceRef.Kind != "Node" {
-					return nil, false
-				}
-
-				lifecycleStage, err := NewLifecycleStage(stage)
+	c.stageGetter = resources.NewDynamicGetter[
+		[]*internalversion.Stage,
+		*v1alpha1.Stage,
+		*v1alpha1.StageList,
+	](
+		c.conf.TypedKwokClient.KwokV1alpha1().Stages(),
+		func(objs []*v1alpha1.Stage) []*internalversion.Stage {
+			return slices.FilterAndMap(objs, func(obj *v1alpha1.Stage) (*internalversion.Stage, bool) {
+				r, err := internalversion.ConvertToInternalStage(obj)
 				if err != nil {
-					logger.Error("failed to create node lifecycle stage", err, "stage", stage)
+					logger.Error("failed to convert to internal stage", err, "obj", obj)
 					return nil, false
 				}
-				return lifecycleStage, true
+				return r, true
 			})
-			return lifecycle
-		})
+		},
+	)
 
-		podLifecycleGetter = resources.NewFilter[Lifecycle, []*internalversion.Stage](getter, func(stages []*internalversion.Stage) Lifecycle {
-			lifecycle := slices.FilterAndMap(stages, func(stage *internalversion.Stage) (*LifecycleStage, bool) {
-				if stage.Spec.ResourceRef.Kind != "Pod" {
-					return nil, false
-				}
-
-				lifecycleStage, err := NewLifecycleStage(stage)
-				if err != nil {
-					logger.Error("failed to create node lifecycle stage", err, "stage", stage)
-					return nil, false
-				}
-				return lifecycleStage, true
-			})
-			return lifecycle
-		})
-
-		err := getter.Start(ctx)
-		if err != nil {
-			return err
-		}
-	} else {
-		lifecycle, err := NewLifecycle(conf.PodStages)
-		if err != nil {
-			return fmt.Errorf("failed to create pod lifecycle: %w", err)
-		}
-		podLifecycleGetter = resources.NewStaticGetter(lifecycle)
-
-		lifecycle, err = NewLifecycle(conf.NodeStages)
-		if err != nil {
-			return fmt.Errorf("failed to create node lifecycle: %w", err)
-		}
-		nodeLifecycleGetter = resources.NewStaticGetter(lifecycle)
+	err := c.stageGetter.Start(ctx)
+	if err != nil {
+		return err
 	}
 
-	nodes, err := NewNodeController(NodeControllerConfig{
-		Clock:                                 conf.Clock,
-		TypedClient:                           conf.TypedClient,
-		NodeCacheGetter:                       nodesCache,
-		NodeIP:                                conf.NodeIP,
-		NodeName:                              conf.NodeName,
-		NodePort:                              conf.NodePort,
-		DisregardStatusWithAnnotationSelector: conf.DisregardStatusWithAnnotationSelector,
-		DisregardStatusWithLabelSelector:      conf.DisregardStatusWithLabelSelector,
-		OnNodeManagedFunc: func(nodeName string) {
-			onNodeManagedFunc(nodeName)
-		},
-		Lifecycle:            nodeLifecycleGetter,
-		PlayStageParallelism: conf.NodePlayStageParallelism,
-		FuncMap:              defaultFuncMap,
-		Recorder:             recorder,
-		ReadOnlyFunc:         readOnlyFunc,
-		EnableMetrics:        conf.EnableMetrics,
+	stagesManager := NewStagesManager(StagesManagerConfig{
+		StartFunc:   c.startStageController,
+		StageGetter: c.stageGetter,
+	})
+
+	err = stagesManager.Start(ctx)
+	if err != nil {
+		return err
+	}
+
+	c.stagesManager = stagesManager
+	return nil
+}
+
+func (c *Controller) onNodeManaged(nodeName string) {
+	if c.onNodeManagedFunc == nil {
+		return
+	}
+	c.onNodeManagedFunc(nodeName)
+}
+
+func (c *Controller) onNodeUnmanaged(nodeName string) {
+	if c.onNodeUnmanagedFunc == nil {
+		return
+	}
+	c.onNodeUnmanagedFunc(nodeName)
+}
+
+func (c *Controller) initNodeController(ctx context.Context, lifecycle resources.Getter[lifecycle.Lifecycle]) (err error) {
+	c.nodes, err = NewNodeController(NodeControllerConfig{
+		Clock:                                 c.conf.Clock,
+		TypedClient:                           c.conf.TypedClient,
+		NodeIP:                                c.conf.NodeIP,
+		NodeName:                              c.conf.NodeName,
+		NodePort:                              c.conf.NodePort,
+		DisregardStatusWithAnnotationSelector: c.conf.DisregardStatusWithAnnotationSelector,
+		DisregardStatusWithLabelSelector:      c.conf.DisregardStatusWithLabelSelector,
+		OnNodeManagedFunc:                     c.onNodeManaged,
+		OnNodeUnmanagedFunc:                   c.onNodeUnmanaged,
+		Lifecycle:                             lifecycle,
+		PlayStageParallelism:                  c.conf.NodePlayStageParallelism,
+		FuncMap:                               c.conf.FuncMap,
+		Recorder:                              c.recorder,
+		ReadOnlyFunc:                          c.readOnlyFunc,
+		EnableMetrics:                         c.conf.EnableMetrics,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create nodes controller: %w", err)
 	}
+	err = c.nodes.Start(ctx, c.nodesChan)
+	if err != nil {
+		return fmt.Errorf("failed to start nodes controller: %w", err)
+	}
 
-	pods, err := NewPodController(PodControllerConfig{
-		Clock:                                 conf.Clock,
-		EnableCNI:                             conf.EnableCNI,
-		TypedClient:                           conf.TypedClient,
-		NodeCacheGetter:                       nodesCache,
-		NodeIP:                                conf.NodeIP,
-		CIDR:                                  conf.CIDR,
-		DisregardStatusWithAnnotationSelector: conf.DisregardStatusWithAnnotationSelector,
-		DisregardStatusWithLabelSelector:      conf.DisregardStatusWithLabelSelector,
-		Lifecycle:                             podLifecycleGetter,
-		PlayStageParallelism:                  conf.PodPlayStageParallelism,
-		NodeGetFunc:                           nodes.Get,
-		FuncMap:                               defaultFuncMap,
-		Recorder:                              recorder,
-		ReadOnlyFunc:                          readOnlyFunc,
-		EnableMetrics:                         conf.EnableMetrics,
+	return nil
+}
+func (c *Controller) initPodController(ctx context.Context, lifecycle resources.Getter[lifecycle.Lifecycle]) (err error) {
+	c.pods, err = NewPodController(PodControllerConfig{
+		Clock:                                 c.conf.Clock,
+		EnableCNI:                             c.conf.EnableCNI,
+		TypedClient:                           c.conf.TypedClient,
+		NodeCacheGetter:                       c.nodeCacheGetter,
+		NodeIP:                                c.conf.NodeIP,
+		CIDR:                                  c.conf.CIDR,
+		DisregardStatusWithAnnotationSelector: c.conf.DisregardStatusWithAnnotationSelector,
+		DisregardStatusWithLabelSelector:      c.conf.DisregardStatusWithLabelSelector,
+		Lifecycle:                             lifecycle,
+		PlayStageParallelism:                  c.conf.PodPlayStageParallelism,
+		NodeGetFunc: func(nodeName string) (*NodeInfo, bool) {
+			if c.nodes == nil {
+				return nil, false
+			}
+
+			return c.nodes.Get(nodeName)
+		},
+		FuncMap:       c.conf.FuncMap,
+		Recorder:      c.recorder,
+		ReadOnlyFunc:  c.readOnlyFunc,
+		EnableMetrics: c.conf.EnableMetrics,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create pods controller: %w", err)
 	}
 
-	podOnNodeManageQueue := queue.NewQueue[string]()
-	if nodeLeases != nil {
-		nodeManageQueue := queue.NewQueue[string]()
-		onLeaseNodeManageFunc = func(nodeName string) {
-			nodeManageQueue.Add(nodeName)
-			podOnNodeManageQueue.Add(nodeName)
-		}
-		onNodeManagedFunc = func(nodeName string) {
-			// Try to hold the lease
-			nodeLeases.TryHold(nodeName)
-		}
-
-		go func() {
-			for {
-				nodeName := nodeManageQueue.GetOrWait()
-				node, ok := nodesCache.Get(nodeName)
-				if !ok {
-					logger.Warn("node not found in cache", "node", nodeName)
-					err := nodesInformer.Sync(ctx, informer.Option{
-						FieldSelector: fields.OneTermEqualSelector("metadata.name", nodeName).String(),
-					}, nodeChan)
-					if err != nil {
-						logger.Error("failed to update node", err, "node", nodeName)
-					}
-					continue
-				}
-				nodeChan <- informer.Event[*corev1.Node]{
-					Type:   informer.Sync,
-					Object: node,
-				}
-			}
-		}()
-	} else {
-		onNodeManagedFunc = func(nodeName string) {
-			podOnNodeManageQueue.Add(nodeName)
-		}
-	}
-
-	go func() {
-		for {
-			nodeName := podOnNodeManageQueue.GetOrWait()
-			err = podsInformer.Sync(ctx, informer.Option{
-				FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-			}, podsChan)
-			if err != nil {
-				logger.Error("failed to update pods on node", err, "node", nodeName)
-			}
-		}
-	}()
-
-	c.broadcaster.StartRecordingToSink(&clientcorev1.EventSinkImpl{Interface: c.typedClient.CoreV1().Events("")})
-	if nodeLeases != nil {
-		err := nodeLeases.Start(ctx, nodeLeasesChan)
-		if err != nil {
-			return fmt.Errorf("failed to start node leases controller: %w", err)
-		}
-	}
-	err = pods.Start(ctx, podsChan)
+	err = c.pods.Start(ctx, c.podsChan)
 	if err != nil {
 		return fmt.Errorf("failed to start pods controller: %w", err)
 	}
-	err = nodes.Start(ctx, nodeChan)
+
+	return nil
+}
+
+func (c *Controller) initStageController(ctx context.Context, ref internalversion.StageResourceRef, lifecycle resources.Getter[lifecycle.Lifecycle]) error {
+	logger := log.FromContext(ctx)
+
+	gv, err := schema.ParseGroupVersion(ref.APIGroup)
 	if err != nil {
-		return fmt.Errorf("failed to start nodes controller: %w", err)
+		return fmt.Errorf("failed to parse group version: %w", err)
 	}
 
-	c.pods = pods
-	c.nodes = nodes
-	c.nodeLeases = nodeLeases
-	c.nodeCacheGetter = nodesCache
-	c.podCacheGetter = podsCache
+	gvr, err := c.conf.RESTMapper.ResourceFor(gv.WithResource(ref.Kind))
+	if err != nil {
+		return fmt.Errorf("failed to get gvk for gvr: %w", err)
+	}
+
+	schema, err := c.patchMeta.Lookup(gvr)
+	if err != nil {
+		return err
+	}
+
+	logger.Info("watching stages", "gvr", gvr)
+	stageInformer := informer.NewInformer[*unstructured.Unstructured, *unstructured.UnstructuredList](c.conf.DynamicClient.Resource(gvr))
+	stageChan := make(chan informer.Event[*unstructured.Unstructured], 1)
+	err = stageInformer.Watch(ctx, informer.Option{}, stageChan)
+	if err != nil {
+		return fmt.Errorf("failed to watch stages: %w", err)
+	}
+
+	stage, err := NewStageController(StageControllerConfig{
+		Clock:                                 c.conf.Clock,
+		DynamicClient:                         c.conf.DynamicClient,
+		ImpersonatingDynamicClient:            c.conf.ImpersonatingDynamicClient,
+		Schema:                                schema,
+		GVR:                                   gvr,
+		DisregardStatusWithAnnotationSelector: c.conf.DisregardStatusWithAnnotationSelector,
+		DisregardStatusWithLabelSelector:      c.conf.DisregardStatusWithLabelSelector,
+		Lifecycle:                             lifecycle,
+		PlayStageParallelism:                  1,
+		FuncMap:                               c.conf.FuncMap,
+		Recorder:                              c.recorder,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create stage controller: %w", err)
+	}
+
+	err = stage.Start(ctx, stageChan)
+	if err != nil {
+		return fmt.Errorf("failed to start stage controller: %w", err)
+	}
+
 	return nil
+}
+
+// Start starts the controller
+func (c *Controller) Start(ctx context.Context) error {
+	err := c.init(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to init controller: %w", err)
+	}
+
+	if len(c.conf.LocalStages) != 0 {
+		for ref, stage := range c.conf.LocalStages {
+			lifecycle, err := lifecycle.NewLifecycle(stage)
+			if err != nil {
+				return err
+			}
+			err = c.startStageController(ctx, ref, resources.NewStaticGetter(lifecycle))
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		err = c.initStagesManager(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to init stages manager: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) podsOnNodeSyncWorker(ctx context.Context) {
+	logger := log.FromContext(ctx)
+	for ctx.Err() == nil {
+		nodeName, ok := c.podOnNodeManageQueue.GetOrWaitWithDone(ctx.Done())
+		if !ok {
+			return
+		}
+		err := c.podsInformer.Sync(ctx, informer.Option{
+			FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+		}, c.podsChan)
+		if err != nil {
+			logger.Error("failed to update pods on node", err, "node", nodeName)
+		}
+	}
 }
 
 // ListNodes returns all nodes
 func (c *Controller) ListNodes() []string {
+	if c.nodes == nil {
+		return nil
+	}
 	return c.nodes.List()
 }
 
 // ListPods returns all pods on the given node
 func (c *Controller) ListPods(nodeName string) ([]log.ObjectRef, bool) {
+	if c.pods == nil {
+		return nil, false
+	}
 	return c.pods.List(nodeName)
 }
 
@@ -505,6 +600,9 @@ func (c *Controller) GetNodeCache() informer.Getter[*corev1.Node] {
 
 // StartedContainersTotal returns the total number of containers started
 func (c *Controller) StartedContainersTotal(nodeName string) int64 {
+	if c.nodes == nil {
+		return 0
+	}
 	nodeInfo, ok := c.nodes.Get(nodeName)
 	if !ok {
 		return 0
