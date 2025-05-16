@@ -23,9 +23,9 @@ LOCAL_BIN_DIR="${ROOT_DIR}/bin"
 
 export PATH="${LOCAL_BIN_DIR}:${PATH}"
 
-KIND_VERSION=0.23.0
+KIND_VERSION=0.27.0
 
-KUBE_VERSION=1.32.2
+KUBE_VERSION=1.33.0
 
 # TODO: Stay at 0.9 in figuring out the Attestations of buildx.
 # https://github.com/docker/buildx/pull/1412
