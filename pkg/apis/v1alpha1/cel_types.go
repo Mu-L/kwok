@@ -1,8 +1,5 @@
-//go:build tools
-// +build tools
-
 /*
-Copyright 2023 The Kubernetes Authors.
+Copyright 2025 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,17 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package tools is used to track binary dependencies with go modules
-// https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
-package tools
+package v1alpha1
 
-import (
-	// code-generator
-	_ "k8s.io/code-generator"
-
-	// controller-gen
-	_ "sigs.k8s.io/controller-tools/cmd/controller-gen"
-
-	// kustomize
-	_ "sigs.k8s.io/kustomize/kustomize/v5"
-)
+// ExpressionCEL is the expression which will be evaluated by CEL.
+type ExpressionCEL struct {
+	// Expression represents the expression which will be evaluated by CEL.
+	Expression string `json:"expression,omitempty"`
+}

@@ -33,6 +33,7 @@ import (
 	nodefast "sigs.k8s.io/kwok/kustomize/stage/node/fast"
 	nodeheartbeat "sigs.k8s.io/kwok/kustomize/stage/node/heartbeat"
 	nodeheartbeatwithlease "sigs.k8s.io/kwok/kustomize/stage/node/heartbeat-with-lease"
+	podfast "sigs.k8s.io/kwok/kustomize/stage/pod/fast"
 	"sigs.k8s.io/kwok/pkg/apis/internalversion"
 	"sigs.k8s.io/kwok/pkg/apis/v1alpha1"
 	"sigs.k8s.io/kwok/pkg/config"
@@ -169,6 +170,11 @@ func (c *Cluster) Save(ctx context.Context) error {
 		return nil
 	}
 
+	components, err := c.Components(ctx)
+	if err != nil {
+		return err
+	}
+
 	var objs []config.InternalObject
 	conf := c.conf.DeepCopy()
 	if conf.Status.Version == "" {
@@ -181,50 +187,65 @@ func (c *Cluster) Save(ctx context.Context) error {
 
 	if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.StageKind) {
 		stages := config.FilterWithTypeFromContext[*internalversion.Stage](ctx)
-		if len(stages) == 0 &&
-			conf.Options.Runtime != consts.RuntimeTypeKind &&
-			conf.Options.Runtime != consts.RuntimeTypeKindPodman &&
-			conf.Options.Runtime != consts.RuntimeTypeKindNerdctl &&
-			conf.Options.Runtime != consts.RuntimeTypeKindLima &&
-			conf.Options.Runtime != consts.RuntimeTypeKindFinch {
-			defaultStages, err := c.getDefaultStages(conf.Options.NodeStatusUpdateFrequencyMilliseconds, conf.Options.NodeLeaseDurationSeconds != 0)
+		if len(stages) == 0 {
+			var nodeStatusUpdateFrequencyMilliseconds = conf.Options.NodeStatusUpdateFrequencyMilliseconds
+			var nodeLeaseDurationSeconds = conf.Options.NodeLeaseDurationSeconds
+
+			if conf.Options.Runtime == consts.RuntimeTypeKind ||
+				conf.Options.Runtime == consts.RuntimeTypeKindPodman ||
+				conf.Options.Runtime == consts.RuntimeTypeKindNerdctl ||
+				conf.Options.Runtime == consts.RuntimeTypeKindLima ||
+				conf.Options.Runtime == consts.RuntimeTypeKindFinch {
+				nodeStatusUpdateFrequencyMilliseconds = 0
+				nodeLeaseDurationSeconds = 40
+			}
+
+			defaultNodeStages, err := getDefaultNodeStages(nodeStatusUpdateFrequencyMilliseconds, nodeLeaseDurationSeconds != 0)
 			if err != nil {
 				return err
 			}
-			objs = appendIntoInternalObjects(objs, defaultStages...)
+			objs = appendIntoInternalObjects(objs, defaultNodeStages...)
+
+			defaultPodStages, err := getDefaultPodStages()
+			if err != nil {
+				return err
+			}
+			objs = appendIntoInternalObjects(objs, defaultPodStages...)
 		} else {
 			objs = appendIntoInternalObjects(objs, stages...)
 		}
 	}
 
-	if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.MetricKind) {
-		metrics := config.FilterWithTypeFromContext[*internalversion.Metric](ctx)
-		if len(metrics) != 0 {
-			objs = appendIntoInternalObjects(objs, metrics...)
-		} else if c.conf.Options.EnableMetricsServer {
-			m, err := config.UnmarshalWithType[*internalversion.Metric, string](resource.DefaultMetricsResource)
-			if err != nil {
-				return err
+	if slices.Contains(components, consts.ComponentMetricsServer) {
+		if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.MetricKind) {
+			metrics := config.FilterWithTypeFromContext[*internalversion.Metric](ctx)
+			if len(metrics) != 0 {
+				objs = appendIntoInternalObjects(objs, metrics...)
+			} else {
+				m, err := config.UnmarshalWithType[*internalversion.Metric, string](resource.DefaultMetricsResource)
+				if err != nil {
+					return err
+				}
+				objs = appendIntoInternalObjects(objs, m)
 			}
-			objs = appendIntoInternalObjects(objs, m)
 		}
-	}
 
-	if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.ResourceUsageKind) {
-		stages := config.FilterWithTypeFromContext[*internalversion.ResourceUsage](ctx)
-		objs = appendIntoInternalObjects(objs, stages...)
-	}
+		if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.ResourceUsageKind) {
+			stages := config.FilterWithTypeFromContext[*internalversion.ResourceUsage](ctx)
+			objs = appendIntoInternalObjects(objs, stages...)
+		}
 
-	if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.ClusterResourceUsageKind) {
-		cru := config.FilterWithTypeFromContext[*internalversion.ClusterResourceUsage](ctx)
-		if len(cru) != 0 {
-			objs = appendIntoInternalObjects(objs, cru...)
-		} else if c.conf.Options.EnableMetricsServer {
-			m, err := config.UnmarshalWithType[*internalversion.ClusterResourceUsage, string](usage.DefaultUsageFromAnnotation)
-			if err != nil {
-				return err
+		if !slices.Contains(conf.Options.EnableCRDs, v1alpha1.ClusterResourceUsageKind) {
+			cru := config.FilterWithTypeFromContext[*internalversion.ClusterResourceUsage](ctx)
+			if len(cru) != 0 {
+				objs = appendIntoInternalObjects(objs, cru...)
+			} else {
+				m, err := config.UnmarshalWithType[*internalversion.ClusterResourceUsage, string](usage.DefaultUsageFromAnnotation)
+				if err != nil {
+					return err
+				}
+				objs = appendIntoInternalObjects(objs, m)
 			}
-			objs = appendIntoInternalObjects(objs, m)
 		}
 	}
 
@@ -278,7 +299,7 @@ func appendIntoInternalObjects[T config.InternalObject](objs []config.InternalOb
 	return objs
 }
 
-func (c *Cluster) getDefaultStages(updateFrequency int64, lease bool) ([]config.InternalObject, error) {
+func getDefaultNodeStages(updateFrequency int64, lease bool) ([]config.InternalObject, error) {
 	objs := []config.InternalObject{}
 
 	nodeInitStage, err := config.UnmarshalWithType[*internalversion.Stage](nodefast.DefaultNodeInit)
@@ -312,6 +333,14 @@ func (c *Cluster) getDefaultStages(updateFrequency int64, lease bool) ([]config.
 
 	objs = append(objs, nodeHeartbeatStage)
 	return objs, nil
+}
+
+func getDefaultPodStages() ([]config.InternalObject, error) {
+	return slices.MapWithError([]string{
+		podfast.DefaultPodReady,
+		podfast.DefaultPodComplete,
+		podfast.DefaultPodDelete,
+	}, config.UnmarshalWithType[config.InternalObject, string])
 }
 
 // KubectlPath returns the path to the kubectl binary. It first tries to find kubectl in the system PATH.
@@ -598,6 +627,29 @@ func (c *Cluster) Etcdctl(ctx context.Context, args ...string) error {
 	// If using versions earlier than v3.4, set `ETCDCTL_API=3` to use v3 API.
 	ctx = exec.WithEnv(ctx, []string{"ETCDCTL_API=3"})
 	return c.Exec(ctx, etcdctlPath, args...)
+}
+
+func (c *Cluster) kectlPath(ctx context.Context) (string, error) {
+	config, err := c.Config(ctx)
+	if err != nil {
+		return "", err
+	}
+	conf := &config.Options
+	kectlPath, err := c.EnsureBinary(ctx, "kectl", conf.KectlBinary)
+	if err != nil {
+		return "", err
+	}
+	return kectlPath, nil
+}
+
+// Kectl runs kectl.
+func (c *Cluster) Kectl(ctx context.Context, args ...string) error {
+	kectlPath, err := c.kectlPath(ctx)
+	if err != nil {
+		return err
+	}
+
+	return c.Exec(ctx, kectlPath, args...)
 }
 
 // GetClientset returns the clientset of the cluster.
