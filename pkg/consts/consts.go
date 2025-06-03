@@ -24,7 +24,7 @@ var (
 
 	// Version is the version of the project.
 	// It will be overwritten during the `make build` process.
-	Version      = "0.7.0"
+	Version      = "0.8.0"
 	BinaryPrefix = "https://github.com/kubernetes-sigs/kwok/releases/download"
 	ImagePrefix  = "registry.k8s.io/kwok"
 
@@ -34,14 +34,17 @@ var (
 
 	// KubeVersion is the version of Kubernetes.
 	// It will be overwritten during the `make build` process.
-	KubeVersion                = "1.32.2"
+	KubeVersion                = "1.33.0"
 	KubeBinaryPrefix           = "https://dl.k8s.io/release"
 	KubeBinaryUnofficialPrefix = "https://github.com/kwok-ci/k8s/releases/download"
 	KubeImagePrefix            = "registry.k8s.io"
 
 	EtcdBinaryPrefix = "https://github.com/etcd-io/etcd/releases/download"
 
-	KindVersion         = "0.23.0"
+	KectlVersion      = "0.0.8"
+	KectlBinaryPrefix = "https://github.com/kwok-ci/kectl/releases/download"
+
+	KindVersion         = "0.27.0"
 	KindBinaryPrefix    = "https://github.com/kubernetes-sigs/kind/releases/download"
 	KindNodeImagePrefix = "docker.io/kindest"
 
@@ -51,15 +54,15 @@ var (
 
 	DashboardMetricsScraperVersion = "1.0.9"
 
-	PrometheusVersion      = "2.53.0"
+	PrometheusVersion      = "3.3.1"
 	PrometheusBinaryPrefix = "https://github.com/prometheus/prometheus/releases/download"
 	PrometheusImagePrefix  = "docker.io/prom"
 
-	JaegerVersion      = "1.58.1"
+	JaegerVersion      = "1.69.0"
 	JaegerBinaryPrefix = "https://github.com/jaegertracing/jaeger/releases/download"
 	JaegerImagePrefix  = "docker.io/jaegertracing"
 
-	MetricsServerVersion      = "0.7.1"
+	MetricsServerVersion      = "0.7.2"
 	MetricsServerBinaryPrefix = "https://github.com/kubernetes-sigs/metrics-server/releases/download"
 	MetricsServerImagePrefix  = "registry.k8s.io/metrics-server"
 
